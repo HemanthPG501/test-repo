@@ -44,10 +44,17 @@ jobs:
         run: |
           zip -r partial-config.zip partial_config
 
-      - name: Upload ZIP and file list
+      # ✅ Upload ZIP separately
+      - name: Upload partial config ZIP
         uses: actions/upload-artifact@v4
         with:
-          name: partial-config
-          path: |
-            partial-config.zip
-            changed_files.txt
+          name: partial-config-zip
+          path: partial-config.zip
+
+      # ✅ Upload file list separately
+      - name: Upload changed files list
+        uses: actions/upload-artifact@v4
+        with:
+          name: changed-files-list
+          path: changed_files.txt
+
