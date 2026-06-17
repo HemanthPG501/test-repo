@@ -28,25 +28,20 @@ jobs:
           echo "Changed files:"
           cat changed_files.txt
       
-      # ✅ Create folder for partial config
-      - name: Prepare partial config folder
+      # ✅ Create partial-config.zip (only changed files, no wrapper folder)
+      - name: Create partial-config.zip
         run: |
-          mkdir -p generated-config/partial-config
+          zip -@ partial-config.zip < changed_files.txt
 
-          while read file; do
-            if [ -f "$file" ]; then
-              mkdir -p generated-config/partial-config/$(dirname "$file")
-              cp "$file" generated-config/partial-config/$file
-            fi
-          done < changed_files.txt
-
-      # ✅ Move changed_files.txt into main folder
-      - name: Move file list
+      # ✅ Create final folder structure
+      - name: Prepare final artifact folder
         run: |
+          mkdir generated-config
+          mv partial-config.zip generated-config/
           mv changed_files.txt generated-config/
 
-      # ✅ Upload everything as ONE artifact
-      - name: Upload generated config
+      # ✅ Upload single artifact (GitHub will zip this)
+      - name: Upload final artifact
         uses: actions/upload-artifact@v4
         with:
           name: generated-config
