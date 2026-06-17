@@ -1,0 +1,53 @@
+name: Generate Partial Config ZIP
+
+on:
+  pull_request:
+    types: [closed]
+    branches:
+      - rel    # your release branch
+
+jobs:
+  generate-config:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout rel branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch master and rel branches
+        run: |
+          git fetch origin master
+          git fetch origin rel
+
+      - name: Get changed files (rel vs master)
+        run: |
+          git diff --name-only --diff-filter=ACMRT origin/master...origin/rel > changed_files.txt
+          echo "Changed files:"
+          cat changed_files.txt
+
+      - name: Create folder
+        run: mkdir partial_config
+
+      - name: Copy changed files (preserve structure)
+        run: |
+          while read file; do
+            if [ -f "$file" ]; then
+              mkdir -p partial_config/$(dirname "$file")
+              cp "$file" partial_config/$file
+            fi
+          done < changed_files.txt
+
+      - name: Create ZIP
+        run: |
+          zip -r partial-config.zip partial_config
+
+      - name: Upload ZIP and file list
+        uses: actions/upload-artifact@v4
+        with:
+          name: partial-config
+          path: |
+            partial-config.zip
+            changed_files.txt
