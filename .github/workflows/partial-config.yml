@@ -27,22 +27,11 @@ jobs:
           git diff --name-only --diff-filter=ACMRT origin/master...origin/rel > changed_files.txt
           echo "Changed files:"
           cat changed_files.txt
-
-      - name: Create folder
-        run: mkdir partial_config
-
-      - name: Copy changed files (preserve structure)
+          
+      # ✅ Create ZIP directly from file list (no wrapper folder)
+      - name: Create ZIP (no wrapper folder)
         run: |
-          while read file; do
-            if [ -f "$file" ]; then
-              mkdir -p partial_config/$(dirname "$file")
-              cp "$file" partial_config/$file
-            fi
-          done < changed_files.txt
-
-      - name: Create ZIP
-        run: |
-          zip -r partial-config.zip partial_config
+          zip -@ partial-config.zip < changed_files.txt
 
       # ✅ Upload ZIP separately
       - name: Upload partial config ZIP
