@@ -27,23 +27,27 @@ jobs:
           git diff --name-only --diff-filter=ACMRT origin/master...origin/rel > changed_files.txt
           echo "Changed files:"
           cat changed_files.txt
-          
-      # ✅ Create ZIP directly from file list (no wrapper folder)
-      - name: Create ZIP (no wrapper folder)
+      
+      # ✅ Create folder for partial config
+      - name: Prepare partial config folder
         run: |
-          zip -@ partial-config.zip < changed_files.txt
+          mkdir -p generated-config/partial-config
 
-      # ✅ Upload ZIP separately
-      - name: Upload partial config ZIP
+          while read file; do
+            if [ -f "$file" ]; then
+              mkdir -p generated-config/partial-config/$(dirname "$file")
+              cp "$file" generated-config/partial-config/$file
+            fi
+          done < changed_files.txt
+
+      # ✅ Move changed_files.txt into main folder
+      - name: Move file list
+        run: |
+          mv changed_files.txt generated-config/
+
+      # ✅ Upload everything as ONE artifact
+      - name: Upload generated config
         uses: actions/upload-artifact@v4
         with:
-          name: partial-config-zip
-          path: partial-config.zip
-
-      # ✅ Upload file list separately
-      - name: Upload changed files list
-        uses: actions/upload-artifact@v4
-        with:
-          name: changed-files-list
-          path: changed_files.txt
-
+          name: generated-config
+          path: generated-config
