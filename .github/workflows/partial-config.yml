@@ -4,7 +4,7 @@ on:
   pull_request:
     types: [closed]
     branches:
-      - rel    # your release branch
+      - '*_REL'   # ✅ matches all release branches
 
 jobs:
   generate-config:
@@ -12,35 +12,40 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout rel branch
+      - name: Checkout target branch
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Fetch master and rel branches
+      - name: Fetch master and target branch
         run: |
           git fetch origin master
-          git fetch origin rel
+          git fetch origin ${{ github.event.pull_request.base.ref }}
 
-      - name: Get changed files (rel vs master)
+      - name: Get changed files (target vs master)
         run: |
-          git diff --name-only --diff-filter=ACMRT origin/master...origin/rel > changed_files.txt
+          TARGET_BRANCH=${{ github.event.pull_request.base.ref }}
+
+          echo "Using branch: $TARGET_BRANCH"
+
+          git diff --name-only --diff-filter=ACMRT origin/master...origin/$TARGET_BRANCH > changed_files.txt
+
           echo "Changed files:"
           cat changed_files.txt
-      
-      # ✅ Create partial-config.zip (only changed files, no wrapper folder)
+          
+#  Create partial-config.zip
       - name: Create partial-config.zip
         run: |
           zip -@ partial-config.zip < changed_files.txt
-
-      # ✅ Create final folder structure
+          
+#  Create final folder structure
       - name: Prepare final artifact folder
         run: |
           mkdir generated-config
           mv partial-config.zip generated-config/
           mv changed_files.txt generated-config/
 
-      # ✅ Upload single artifact (GitHub will zip this)
+#  Upload single artifact (GitHub will zip this)
       - name: Upload final artifact
         uses: actions/upload-artifact@v4
         with:
