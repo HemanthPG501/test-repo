@@ -28,9 +28,13 @@ jobs:
 
           echo "Using branch: $TARGET_BRANCH"
 
-          git diff --name-only --diff-filter=ACMRT origin/master...origin/$TARGET_BRANCH > changed_files.txt
+          #  All changed files (unfiltered)
+          git diff --name-only --diff-filter=ACMRT origin/master...origin/$TARGET_BRANCH > all_changed_files.txt
 
-          echo "Changed files:"
+          #  Filter out .yml / .yaml files
+          grep -v -E '\.ya?ml$' all_changed_files.txt > changed_files.txt
+
+          echo "Filtered changed files:"
           cat changed_files.txt
           
 #  Create partial-config.zip
@@ -44,6 +48,7 @@ jobs:
           mkdir generated-config
           mv partial-config.zip generated-config/
           mv changed_files.txt generated-config/
+          mv all_changed_files.txt generated-config/
 
 #  Upload single artifact (GitHub will zip this)
       - name: Upload final artifact
