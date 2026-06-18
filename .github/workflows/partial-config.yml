@@ -1,0 +1,58 @@
+name: Generate Partial Config ZIP
+
+on:
+  pull_request:
+    types: [closed]
+    branches:
+      - '*REL*'   #  matches ALL release branches
+
+jobs:
+  generate-config:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout target branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch master and target branch
+        run: |
+          git fetch origin master
+          git fetch origin ${{ github.event.pull_request.base.ref }}
+
+      - name: Get changed files (target vs master)
+        run: |
+          TARGET_BRANCH=${{ github.event.pull_request.base.ref }}
+
+          echo "Using branch: $TARGET_BRANCH"
+
+          #  All changed files (unfiltered)
+          git diff --name-only --diff-filter=ACMRT origin/master...origin/$TARGET_BRANCH > all_changed_files.txt
+
+          #  Filter out .yml / .yaml files
+          grep -v -E '\.ya?ml$' all_changed_files.txt > changed_files.txt
+
+          echo "Filtered changed files:"
+          cat changed_files.txt
+          
+#  Create partial-config.zip
+      - name: Create partial-config.zip
+        run: |
+          zip -@ partial-config.zip < changed_files.txt
+          
+#  Create final folder structure
+      - name: Prepare final artifact folder
+        run: |
+          mkdir generated-config
+          mv partial-config.zip generated-config/
+          mv changed_files.txt generated-config/
+          mv all_changed_files.txt generated-config/
+
+#  Upload single artifact (GitHub will zip this)
+      - name: Upload final artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: generated-config
+          path: generated-config
