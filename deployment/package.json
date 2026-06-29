@@ -1,0 +1,12 @@
+{
+  "name": "config-manager-deployment",
+  "version": "1.0.0",
+  "description": "Automates Nokia Configuration Manager partial config deployment using Playwright",
+  "main": "deploy-config-manager.js",
+  "scripts": {
+    "deploy": "node deploy-config-manager.js"
+  },
+  "dependencies": {
+    "@playwright/test": "^1.45.0"
+  }
+}

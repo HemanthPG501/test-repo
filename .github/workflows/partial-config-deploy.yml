@@ -1,0 +1,183 @@
+name: Partial Config Build and Deploy
+
+on:
+  pull_request:
+    types:
+      - closed
+    branches:
+      - 'FLOW_CSC_SSC_WATSON_SMP20_*_REL_*'
+      - '*_REL_*'
+
+  workflow_dispatch:
+    inputs:
+      release_branch:
+        description: 'Release branch name'
+        required: true
+        type: string
+      deploy_environment:
+        description: 'Target environment'
+        required: true
+        default: 'qa'
+        type: choice
+        options:
+          - qa
+          - cert
+          - prod
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  prepare-partial-config:
+    name: Prepare Partial Config ZIP
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.pull_request.merged == true)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout release branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.release_branch || github.base_ref }}
+
+      - name: Fetch master branch
+        run: |
+          git fetch origin master
+
+      - name: Identify changed files between master and release branch
+        shell: bash
+        run: |
+          echo "Current branch:"
+          git branch --show-current
+
+          echo "Finding changed files between origin/master and current release branch..."
+
+          git diff --name-only origin/master HEAD \
+            | grep -v '^.github/' \
+            | grep -v '^deployment/' \
+            | grep -v '\.yml$' \
+            | grep -v '\.yaml$' \
+            > changed_files.txt || true
+
+          echo "Changed files:"
+          cat changed_files.txt || true
+
+          cp changed_files.txt all_changed_files.txt
+
+          if [ ! -s changed_files.txt ]; then
+            echo "No changed files found. Stopping."
+            exit 1
+          fi
+
+      - name: Create partial-config.zip
+        shell: bash
+        run: |
+          rm -f partial-config.zip
+
+          while IFS= read -r file; do
+            if [ -f "$file" ]; then
+              echo "Adding file: $file"
+              zip -r partial-config.zip "$file"
+            elif [ -d "$file" ]; then
+              echo "Adding directory: $file"
+              zip -r partial-config.zip "$file"
+            else
+              echo "Skipping missing path: $file"
+            fi
+          done < changed_files.txt
+
+          echo "ZIP content:"
+          unzip -l partial-config.zip
+
+      - name: Upload generated config artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: generated-config
+          path: |
+            partial-config.zip
+            changed_files.txt
+            all_changed_files.txt
+          if-no-files-found: error
+
+  deploy-partial-config:
+    name: Deploy Partial Config to Configuration Manager
+    needs: prepare-partial-config
+
+    # Use ubuntu-latest only if GitHub-hosted runner can access Nokia config URL.
+    # If URL requires VPN/internal network, replace with: runs-on: self-hosted
+    runs-on: ubuntu-latest
+
+    # Recommended: configure GitHub Environment approval for cert/prod.
+    environment: ${{ github.event_name == 'workflow_dispatch' && inputs.deploy_environment || 'qa' }}
+
+    env:
+      CONFIG_MANAGER_URL: ${{ secrets.CONFIG_MANAGER_URL }}
+      CONFIG_MANAGER_USERNAME: ${{ secrets.CONFIG_MANAGER_USERNAME }}
+      CONFIG_MANAGER_PASSWORD: ${{ secrets.CONFIG_MANAGER_PASSWORD }}
+      CONFIG_ZIP_PATH: partial-config.zip
+      DEPLOYMENT_DESCRIPTION: >
+        Automated partial config deployment from GitHub Actions.
+        Repository: ${{ github.repository }},
+        Run ID: ${{ github.run_id }},
+        Commit: ${{ github.sha }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download generated config artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: generated-config
+          path: .
+
+      - name: Show downloaded files
+        shell: bash
+        run: |
+          echo "Downloaded files:"
+          ls -la
+
+          echo "ZIP content:"
+          unzip -l partial-config.zip
+
+          echo "Changed files:"
+          cat changed_files.txt
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install deployment dependencies
+        working-directory: deployment
+        run: npm install
+
+      - name: Install Playwright browser
+        working-directory: deployment
+        run: npx playwright install chromium --with-deps
+
+      - name: Deploy partial config using Configuration Manager UI
+        working-directory: deployment
+        run: node deploy-config-manager.js
+        env:
+          CONFIG_MANAGER_URL: ${{ env.CONFIG_MANAGER_URL }}
+          CONFIG_MANAGER_USERNAME: ${{ env.CONFIG_MANAGER_USERNAME }}
+          CONFIG_MANAGER_PASSWORD: ${{ env.CONFIG_MANAGER_PASSWORD }}
+          CONFIG_ZIP_PATH: ../partial-config.zip
+          DEPLOYMENT_DESCRIPTION: ${{ env.DEPLOYMENT_DESCRIPTION }}
+          HEADLESS: 'true'
+
+      - name: Upload deployment screenshots and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: deployment-evidence
+          path: |
+            deployment/*.png
+            changed_files.txt
+            all_changed_files.txt
+            partial-config.zip
+          if-no-files-found: ignore
