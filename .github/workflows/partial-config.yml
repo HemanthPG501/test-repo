@@ -1,0 +1,202 @@
+name: Generate Partial Config ZIP and Deploy
+
+on:
+  pull_request:
+    types:
+      - closed
+    branches:
+      - '*_REL_*'
+      - '*REL*'
+
+  workflow_dispatch:
+    inputs:
+      deploy_description:
+        description: 'Deployment description'
+        required: false
+        default: 'Automated partial config deployment from GitHub Actions'
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  generate-config:
+    name: Generate Partial Config ZIP
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      github.event.pull_request.merged == true
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # ------------------------------------------------------------------
+      # KEEP YOUR EXISTING ZIP GENERATION LOGIC HERE
+      # ------------------------------------------------------------------
+      # Your current process already compares master/release branch,
+      # identifies changed files, creates the final folder structure,
+      # and generates partial-config.zip.
+      #
+      # Requirement:
+      # Final ZIP file must be available as:
+      # partial-config.zip
+      # ------------------------------------------------------------------
+
+
+      - name: Fetch master and target branch
+        run: |
+          git fetch origin master
+          git fetch origin ${{ github.event.pull_request.base.ref }}
+
+      - name: Get changed files (target vs master)
+        run: |
+          TARGET_BRANCH=${{ github.event.pull_request.base.ref }}
+
+          echo "Using branch: $TARGET_BRANCH"
+
+          #  All changed files (unfiltered)
+          git diff --name-only --diff-filter=ACMRT origin/master...origin/$TARGET_BRANCH > all_changed_files.txt
+
+          #  Filter out .yml / .yaml files
+          grep -v -E '\.ya?ml$' all_changed_files.txt > changed_files.txt
+
+          echo "Filtered changed files:"
+          cat changed_files.txt
+          
+#  Create partial-config.zip
+      - name: Create partial-config.zip
+        run: |
+          zip -@ partial-config.zip < changed_files.txt
+          
+#  Create final folder structure
+      - name: Prepare final artifact folder
+        run: |
+          mkdir generated-config
+          mv partial-config.zip generated-config/
+          mv changed_files.txt generated-config/
+          mv all_changed_files.txt generated-config/
+
+#  Upload single artifact (GitHub will zip this)
+      - name: Upload final artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: generated-config
+          path: generated-config
+          
+          
+          
+          
+          
+        
+      # Example safety check. Keep this even if your ZIP generation is above.
+      - name: Verify partial config ZIP exists
+        shell: bash
+        run: |
+          echo "Checking generated ZIP file..."
+
+          if [ ! -f "partial-config.zip" ]; then
+            echo "ERROR: partial-config.zip not found."
+            echo "Please ensure your existing ZIP generation step creates partial-config.zip at repository root."
+            exit 1
+          fi
+
+          echo "partial-config.zip found."
+          ls -lh partial-config.zip
+
+          echo "ZIP content:"
+          unzip -l partial-config.zip
+
+      - name: Upload partial config artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: partial-config-artifact
+          path: partial-config.zip
+          if-no-files-found: error
+
+  deploy-config:
+    name: Deploy Partial Config to Configuration Manager
+    needs: generate-config
+    runs-on: ubuntu-latest
+
+    env:
+      CONFIG_MANAGER_URL: ${{ secrets.CONFIG_MANAGER_URL }}
+      CONFIG_MANAGER_USERNAME: ${{ secrets.CONFIG_MANAGER_USERNAME }}
+      CONFIG_MANAGER_PASS: ${{ secrets.CONFIG_MANAGER_PASS }}
+      CONFIG_ZIP_PATH: ../partial-config.zip
+      DEPLOY_MODE: merge
+      DEPLOY_DESCRIPTION: >
+        ${{ github.event_name == 'workflow_dispatch' && inputs.deploy_description || 'Automated partial config deployment from GitHub Actions' }}
+        | Repo: ${{ github.repository }}
+        | Run: ${{ github.run_id }}
+        | Commit: ${{ github.sha }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download partial config artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: partial-config-artifact
+          path: .
+
+      - name: Verify downloaded ZIP
+        shell: bash
+        run: |
+          echo "Current directory:"
+          pwd
+
+          echo "Files:"
+          ls -la
+
+          if [ ! -f "partial-config.zip" ]; then
+            echo "ERROR: partial-config.zip artifact was not downloaded."
+            exit 1
+          fi
+
+          echo "Downloaded ZIP:"
+          ls -lh partial-config.zip
+
+          echo "ZIP content:"
+          unzip -l partial-config.zip
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Playwright dependencies
+        working-directory: deployment
+        run: npm install
+
+      - name: Install Chromium browser
+        working-directory: deployment
+        run: npx playwright install chromium --with-deps
+
+      - name: Deploy config using Nokia Configuration Manager UI
+        working-directory: deployment
+        run: node deploy-config-manager.js
+        env:
+          CONFIG_MANAGER_URL: ${{ env.CONFIG_MANAGER_URL }}
+          CONFIG_MANAGER_USERNAME: ${{ env.CONFIG_MANAGER_USERNAME }}
+          CONFIG_MANAGER_PASS: ${{ env.CONFIG_MANAGER_PASS }}
+          CONFIG_ZIP_PATH: ${{ env.CONFIG_ZIP_PATH }}
+          DEPLOY_MODE: ${{ env.DEPLOY_MODE }}
+          DEPLOY_DESCRIPTION: ${{ env.DEPLOY_DESCRIPTION }}
+          HEADLESS: 'true'
+
+      - name: Upload deployment screenshots and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: deployment-evidence
+          path: |
+            deployment/screenshots/**
+            deployment/logs/**
+            partial-config.zip
+          if-no-files-found: ignore
