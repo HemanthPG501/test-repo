@@ -4,33 +4,72 @@ const path = require('path');
 
 const CONFIG_MANAGER_URL = process.env.CONFIG_MANAGER_URL;
 const CONFIG_MANAGER_USERNAME = process.env.CONFIG_MANAGER_USERNAME;
-const CONFIG_MANAGER_PASSWORD = process.env.CONFIG_MANAGER_PASSWORD;
-const CONFIG_ZIP_PATH = process.env.CONFIG_ZIP_PATH || 'partial-config.zip';
-const DEPLOYMENT_DESCRIPTION =
-  process.env.DEPLOYMENT_DESCRIPTION ||
-  `Automated partial config deployment from GitHub Actions - Run ID: ${process.env.GITHUB_RUN_ID || 'local'}`;
-
+const CONFIG_MANAGER_PASS = process.env.CONFIG_MANAGER_PASS;
+const CONFIG_ZIP_PATH = process.env.CONFIG_ZIP_PATH || '../partial-config.zip';
+const DEPLOY_MODE = (process.env.DEPLOY_MODE || 'merge').toLowerCase();
+const DEPLOY_DESCRIPTION =
+  process.env.DEPLOY_DESCRIPTION ||
+  `Automated partial config deployment from GitHub Actions - Run ${process.env.GITHUB_RUN_ID || 'local'}`;
 const HEADLESS = process.env.HEADLESS !== 'false';
 
-function requiredEnv(name, value) {
-  if (!value || value.trim() === '') {
-    throw new Error(`Missing required environment variable: ${name}`);
+const screenshotsDir = path.resolve('screenshots');
+const logsDir = path.resolve('logs');
+
+function ensureFolders() {
+  if (!fs.existsSync(screenshotsDir)) {
+    fs.mkdirSync(screenshotsDir, { recursive: true });
+  }
+
+  if (!fs.existsSync(logsDir)) {
+    fs.mkdirSync(logsDir, { recursive: true });
   }
 }
 
-async function safeScreenshot(page, name) {
+function validateInputs() {
+  const missing = [];
+
+  if (!CONFIG_MANAGER_URL) missing.push('CONFIG_MANAGER_URL');
+  if (!CONFIG_MANAGER_USERNAME) missing.push('CONFIG_MANAGER_USERNAME');
+  if (!CONFIG_MANAGER_PASS) missing.push('CONFIG_MANAGER_PASS');
+
+  if (missing.length > 0) {
+    throw new Error(`Missing required environment variables: ${missing.join(', ')}`);
+  }
+
+  if (DEPLOY_MODE !== 'merge') {
+    throw new Error(`Unsupported DEPLOY_MODE: ${DEPLOY_MODE}. Currently only merge is automated.`);
+  }
+
+  const absoluteZipPath = path.resolve(CONFIG_ZIP_PATH);
+
+  if (!fs.existsSync(absoluteZipPath)) {
+    throw new Error(`Config ZIP file not found: ${absoluteZipPath}`);
+  }
+
+  return absoluteZipPath;
+}
+
+async function screenshot(page, name) {
+  const filePath = path.join(screenshotsDir, name);
+
   try {
     await page.screenshot({
-      path: name,
+      path: filePath,
       fullPage: true
     });
-    console.log(`Screenshot captured: ${name}`);
+    console.log(`Screenshot saved: ${filePath}`);
   } catch (error) {
     console.log(`Unable to capture screenshot ${name}: ${error.message}`);
   }
 }
 
-async function getPageText(page) {
+async function writeLog(name, content) {
+  const filePath = path.join(logsDir, name);
+  fs.writeFileSync(filePath, content || '', 'utf8');
+  console.log(`Log saved: ${filePath}`);
+}
+
+async function getBodyText(page) {
   try {
     return await page.locator('body').innerText({ timeout: 5000 });
   } catch {
@@ -38,168 +77,242 @@ async function getPageText(page) {
   }
 }
 
-async function clickFirstAvailable(page, locators, stepName) {
-  for (const locator of locators) {
+async function fillFirstVisible(page, selectors, value, stepName) {
+  for (const selector of selectors) {
     try {
-      const element = page.locator(locator).first();
-      await element.waitFor({ state: 'visible', timeout: 5000 });
-      await element.click();
-      console.log(`Completed step: ${stepName} using locator: ${locator}`);
-      return;
+      const locator = page.locator(selector).first();
+      await locator.waitFor({ state: 'visible', timeout: 7000 });
+      await locator.fill(value);
+      console.log(`Completed: ${stepName} using selector: ${selector}`);
+      return selector;
     } catch {
-      // Try next locator
+      // Try next selector
     }
   }
 
-  throw new Error(`Unable to complete step: ${stepName}. None of the locators worked.`);
+  throw new Error(`Failed step: ${stepName}. No matching selector found.`);
 }
 
-async function fillFirstAvailable(page, locators, value, stepName) {
-  for (const locator of locators) {
+async function clickFirstVisible(page, selectors, stepName) {
+  for (const selector of selectors) {
     try {
-      const element = page.locator(locator).first();
-      await element.waitFor({ state: 'visible', timeout: 5000 });
-      await element.fill(value);
-      console.log(`Completed step: ${stepName} using locator: ${locator}`);
-      return;
+      const locator = page.locator(selector).first();
+      await locator.waitFor({ state: 'visible', timeout: 7000 });
+      await locator.click();
+      console.log(`Completed: ${stepName} using selector: ${selector}`);
+      return selector;
     } catch {
-      // Try next locator
+      // Try next selector
     }
   }
 
-  throw new Error(`Unable to complete step: ${stepName}. None of the locators worked.`);
+  throw new Error(`Failed step: ${stepName}. No matching selector found.`);
 }
 
-async function chooseMergeConfig(page) {
-  const mergeLocators = [
-    'label:has-text("Merge")',
-    'label:has-text("merge")',
-    'text=Merge the config',
-    'text=Merge Config',
-    'text=merge the config',
-    'input[type="radio"][value="merge" i]',
+async function selectMergeOption(page) {
+  const mergeSelectors = [
+    'label:has-text("Merge active config with config in .zip file")',
+    'text=Merge active config with config in .zip file',
     'input[type="radio"][value*="merge" i]',
-    'input[name*="merge" i]',
-    'input[id*="merge" i]'
+    'input[type="radio"][name*="merge" i]',
+    'input[type="radio"]'
   ];
 
-  for (const locator of mergeLocators) {
+  for (const selector of mergeSelectors) {
     try {
-      const element = page.locator(locator).first();
-      await element.waitFor({ state: 'visible', timeout: 5000 });
+      const locator = page.locator(selector).first();
+      await locator.waitFor({ state: 'visible', timeout: 7000 });
 
-      const tagName = await element.evaluate(el => el.tagName.toLowerCase()).catch(() => '');
+      const tagName = await locator.evaluate(el => el.tagName.toLowerCase()).catch(() => '');
 
       if (tagName === 'input') {
-        await element.check();
+        await locator.check();
       } else {
-        await element.click();
+        await locator.click();
       }
 
-      console.log(`Selected merge config option using locator: ${locator}`);
+      console.log(`Merge option selected using selector: ${selector}`);
       return;
     } catch {
-      // Try next locator
+      // Try next selector
     }
   }
 
-  throw new Error('Unable to select Merge Config option. Please inspect the radio button selector.');
+  throw new Error('Unable to select Merge option.');
 }
 
-async function uploadZipFile(page, zipPath) {
-  const absoluteZipPath = path.resolve(zipPath);
-
-  if (!fs.existsSync(absoluteZipPath)) {
-    throw new Error(`Config ZIP file not found: ${absoluteZipPath}`);
-  }
-
-  const fileInputLocators = [
+async function uploadZip(page, absoluteZipPath) {
+  const uploadSelectors = [
     'input[type="file"]',
     'input[name*="file" i]',
-    'input[id*="file" i]',
-    'input[name*="upload" i]',
-    'input[id*="upload" i]'
+    'input[id*="file" i]'
   ];
 
-  for (const locator of fileInputLocators) {
+  for (const selector of uploadSelectors) {
     try {
-      const input = page.locator(locator).first();
-      await input.waitFor({ state: 'attached', timeout: 5000 });
-      await input.setInputFiles(absoluteZipPath);
-      console.log(`Uploaded ZIP file using locator: ${locator}`);
+      const locator = page.locator(selector).first();
+      await locator.waitFor({ state: 'attached', timeout: 7000 });
+      await locator.setInputFiles(absoluteZipPath);
+      console.log(`ZIP file selected using selector: ${selector}`);
       return;
     } catch {
-      // Try next locator
+      // Try next selector
     }
   }
 
-  throw new Error('Unable to find file upload input. Please inspect the upload page HTML.');
+  throw new Error('Unable to find file input for ZIP upload.');
 }
 
-async function waitForValidationAndCommitButton(page) {
+async function fillDescriptionIfAvailable(page) {
+  const descriptionSelectors = [
+    'textarea[name*="description" i]',
+    'textarea[id*="description" i]',
+    'textarea',
+    'input[name*="description" i]',
+    'input[id*="description" i]'
+  ];
+
+  for (const selector of descriptionSelectors) {
+    try {
+      const locator = page.locator(selector).first();
+      await locator.waitFor({ state: 'visible', timeout: 5000 });
+      await locator.fill(DEPLOY_DESCRIPTION);
+      console.log(`Description filled using selector: ${selector}`);
+      return;
+    } catch {
+      // Try next selector
+    }
+  }
+
+  console.log('Description field not found. Continuing without description.');
+}
+
+async function waitForValidation(page) {
   console.log('Waiting for validation result...');
 
-  const failurePatterns = [
+  const errorPatterns = [
     /error/i,
     /failed/i,
     /failure/i,
+    /exception/i,
     /invalid/i,
-    /exception/i
+    /not valid/i,
+    /unable/i
   ];
 
-  const successPatterns = [
+  const validationSuccessPatterns = [
     /check complete/i,
     /validation complete/i,
     /validation successful/i,
-    /success/i,
+    /validated/i,
     /commit/i
   ];
 
-  for (let attempt = 1; attempt <= 60; attempt++) {
-    const bodyText = await getPageText(page);
+  for (let attempt = 1; attempt <= 90; attempt++) {
+    const bodyText = await getBodyText(page);
+    await writeLog(`validation-attempt-${attempt}.txt`, bodyText);
 
-    if (failurePatterns.some(pattern => pattern.test(bodyText))) {
-      console.log('Validation page text:');
-      console.log(bodyText);
-      throw new Error('Validation failed. Please check validation logs in screenshot/artifact.');
+    if (errorPatterns.some(pattern => pattern.test(bodyText))) {
+      await screenshot(page, 'validation-error.png');
+      throw new Error('Validation failed. Error text found on validation page.');
     }
 
-    const commitButtonVisible = await page
-      .locator('button:has-text("Commit"), input[type="button"][value*="Commit" i], input[type="submit"][value*="Commit" i], text=Commit')
+    const commitVisible = await page
+      .locator('button:has-text("Commit"), input[type="submit"][value*="Commit" i], input[type="button"][value*="Commit" i], text=Commit')
       .first()
       .isVisible()
       .catch(() => false);
 
-    if (commitButtonVisible || successPatterns.some(pattern => pattern.test(bodyText))) {
-      console.log('Validation looks successful or Commit button is visible.');
+    if (commitVisible) {
+      console.log('Commit button is visible. Validation passed.');
       return;
     }
 
-    await page.waitForTimeout(5000);
+    if (validationSuccessPatterns.some(pattern => pattern.test(bodyText))) {
+      console.log('Validation success text found.');
+      return;
+    }
+
+    await page.waitForTimeout(3000);
   }
 
-  const finalText = await getPageText(page);
-  console.log('Final page text after waiting for validation:');
-  console.log(finalText);
+  await screenshot(page, 'validation-timeout.png');
+  const finalText = await getBodyText(page);
+  await writeLog('validation-timeout-final-page.txt', finalText);
 
-  throw new Error('Timed out waiting for validation completion or Commit button.');
+  throw new Error('Timed out waiting for validation result or Commit button.');
+}
+
+async function clickCommit(page) {
+  await clickFirstVisible(
+    page,
+    [
+      'button:has-text("Commit")',
+      'input[type="submit"][value*="Commit" i]',
+      'input[type="button"][value*="Commit" i]',
+      'text=Commit'
+    ],
+    'click Commit'
+  );
+}
+
+async function waitForDeploymentCompletion(page) {
+  console.log('Waiting for deployment completion...');
+
+  const errorPatterns = [
+    /error/i,
+    /failed/i,
+    /failure/i,
+    /exception/i,
+    /invalid/i
+  ];
+
+  const successPatterns = [
+    /complete/i,
+    /completed/i,
+    /success/i,
+    /successful/i,
+    /committed/i
+  ];
+
+  for (let attempt = 1; attempt <= 90; attempt++) {
+    const bodyText = await getBodyText(page);
+    await writeLog(`deployment-attempt-${attempt}.txt`, bodyText);
+
+    if (errorPatterns.some(pattern => pattern.test(bodyText))) {
+      await screenshot(page, 'deployment-error.png');
+      throw new Error('Deployment failed after commit. Error text found on page.');
+    }
+
+    if (successPatterns.some(pattern => pattern.test(bodyText))) {
+      console.log('Deployment success text found.');
+      await screenshot(page, 'deployment-complete.png');
+      await writeLog('deployment-complete.txt', bodyText);
+      return;
+    }
+
+    await page.waitForTimeout(3000);
+  }
+
+  await screenshot(page, 'deployment-final-state.png');
+  const finalText = await getBodyText(page);
+  await writeLog('deployment-final-state.txt', finalText);
+
+  console.log('Commit was clicked, but completion text was not clearly detected.');
 }
 
 async function main() {
-  requiredEnv('CONFIG_MANAGER_URL', CONFIG_MANAGER_URL);
-  requiredEnv('CONFIG_MANAGER_USERNAME', CONFIG_MANAGER_USERNAME);
-  requiredEnv('CONFIG_MANAGER_PASSWORD', CONFIG_MANAGER_PASSWORD);
+  ensureFolders();
+  const absoluteZipPath = validateInputs();
 
-  console.log('Starting automated partial config deployment...');
+  console.log('Starting Nokia Configuration Manager deployment automation...');
   console.log(`Target URL: ${CONFIG_MANAGER_URL}`);
-  console.log(`ZIP file path: ${CONFIG_ZIP_PATH}`);
+  console.log(`ZIP path: ${absoluteZipPath}`);
+  console.log(`Deploy mode: ${DEPLOY_MODE}`);
 
   const browser = await chromium.launch({
     headless: HEADLESS,
-    args: [
-      '--no-sandbox',
-      '--disable-setuid-sandbox'
-    ]
+    args: ['--no-sandbox', '--disable-setuid-sandbox']
   });
 
   const context = await browser.newContext({
@@ -212,129 +325,103 @@ async function main() {
 
   const page = await context.newPage();
 
-  try {
-    page.setDefaultTimeout(30000);
+  page.setDefaultTimeout(30000);
 
-    console.log('Opening Configuration Manager...');
+  try {
+    console.log('Step 1: Opening Configuration Manager login page...');
     await page.goto(CONFIG_MANAGER_URL, {
       waitUntil: 'domcontentloaded',
       timeout: 60000
     });
 
-    await safeScreenshot(page, '01-login-page.png');
+    await screenshot(page, '01-login-page.png');
+    await writeLog('01-login-page.txt', await getBodyText(page));
 
-    console.log('Filling login details...');
+    console.log('Step 2: Filling login credentials...');
 
-    await fillFirstAvailable(
+    await fillFirstVisible(
       page,
       [
         'input[name="username"]',
-        'input[name="user"]',
         'input[id="username"]',
+        'input[name="user"]',
         'input[id="user"]',
-        'input[type="text"]',
-        'input[name*="login" i]',
-        'input[id*="login" i]'
+        'input[type="text"]'
       ],
       CONFIG_MANAGER_USERNAME,
       'fill username'
     );
 
-    await fillFirstAvailable(
+    await fillFirstVisible(
       page,
       [
         'input[name="password"]',
         'input[id="password"]',
         'input[type="password"]'
       ],
-      CONFIG_MANAGER_PASSWORD,
+      CONFIG_MANAGER_PASS,
       'fill password'
     );
 
-    await clickFirstAvailable(
+    await screenshot(page, '02-login-filled.png');
+
+    console.log('Step 3: Clicking SIGN IN...');
+    await clickFirstVisible(
       page,
       [
+        'button:has-text("SIGN IN")',
+        'button:has-text("Sign In")',
         'button:has-text("Login")',
-        'button:has-text("Log In")',
+        'input[type="submit"][value*="SIGN IN" i]',
         'input[type="submit"][value*="Login" i]',
-        'input[type="button"][value*="Login" i]',
-        'text=Login',
-        'text=Log In'
+        'text=SIGN IN',
+        'text=Sign In'
       ],
-      'click login'
+      'click sign in'
     );
 
-    await page.waitForLoadState('domcontentloaded');
+    await page.waitForLoadState('domcontentloaded').catch(() => {});
     await page.waitForTimeout(3000);
 
-    await safeScreenshot(page, '02-after-login.png');
+    await screenshot(page, '03-after-login.png');
+    await writeLog('03-after-login.txt', await getBodyText(page));
 
-    console.log('Navigating to Application tab if required...');
-
-    try {
-      await clickFirstAvailable(
-        page,
-        [
-          'text=Application',
-          'a:has-text("Application")',
-          'button:has-text("Application")'
-        ],
-        'click Application tab'
-      );
-
-      await page.waitForTimeout(2000);
-    } catch {
-      console.log('Application tab may already be selected. Continuing...');
-    }
-
-    console.log('Opening Upload New Configuration page...');
-
-    await clickFirstAvailable(
+    console.log('Step 4: Clicking Upload New Configuration...');
+    await clickFirstVisible(
       page,
       [
         'text=Upload New Configuration',
         'a:has-text("Upload New Configuration")',
-        'button:has-text("Upload New Configuration")'
+        'button:has-text("Upload New Configuration")',
+        'td:has-text("Upload New Configuration")',
+        'div:has-text("Upload New Configuration")'
       ],
       'click Upload New Configuration'
     );
 
-    await page.waitForLoadState('domcontentloaded');
-    await page.waitForTimeout(3000);
+    await page.waitForLoadState('domcontentloaded').catch(() => {});
+    await page.waitForTimeout(2000);
 
-    await safeScreenshot(page, '03-upload-page.png');
+    await screenshot(page, '04-upload-new-configuration-page.png');
+    await writeLog('04-upload-new-configuration-page.txt', await getBodyText(page));
 
-    console.log('Uploading partial config ZIP...');
-    await uploadZipFile(page, CONFIG_ZIP_PATH);
+    console.log('Step 5: Selecting ZIP file...');
+    await uploadZip(page, absoluteZipPath);
 
-    console.log('Selecting Merge Config option...');
-    await chooseMergeConfig(page);
+    await screenshot(page, '05-zip-selected.png');
 
-    console.log('Filling deployment description...');
+    console.log('Step 6: Selecting Merge option...');
+    await selectMergeOption(page);
 
-    try {
-      await fillFirstAvailable(
-        page,
-        [
-          'textarea[name*="description" i]',
-          'textarea[id*="description" i]',
-          'input[name*="description" i]',
-          'input[id*="description" i]',
-          'textarea',
-          'input[type="text"]'
-        ],
-        DEPLOYMENT_DESCRIPTION,
-        'fill deployment description'
-      );
-    } catch {
-      console.log('Description field not found. Continuing without description...');
-    }
+    await screenshot(page, '06-merge-option-selected.png');
 
-    await safeScreenshot(page, '04-before-upload.png');
+    console.log('Step 7: Filling description...');
+    await fillDescriptionIfAvailable(page);
 
-    console.log('Clicking Upload button...');
+    await screenshot(page, '07-description-filled.png');
 
-    await clickFirstAvailable(
+    console.log('Step 8: Clicking Upload...');
+    await clickFirstVisible(
       page,
       [
         'button:has-text("Upload")',
@@ -346,68 +433,35 @@ async function main() {
     );
 
     await page.waitForLoadState('domcontentloaded').catch(() => {});
-    await page.waitForTimeout(5000);
+    await page.waitForTimeout(3000);
 
-    await safeScreenshot(page, '05-validation-started.png');
+    await screenshot(page, '08-upload-clicked-validation-started.png');
+    await writeLog('08-validation-started.txt', await getBodyText(page));
 
-    await waitForValidationAndCommitButton(page);
+    console.log('Step 9: Waiting for validation completion...');
+    await waitForValidation(page);
 
-    await safeScreenshot(page, '06-validation-complete.png');
+    await screenshot(page, '09-validation-complete-commit-visible.png');
 
-    console.log('Clicking Commit button...');
-
-    await clickFirstAvailable(
-      page,
-      [
-        'button:has-text("Commit")',
-        'input[type="submit"][value*="Commit" i]',
-        'input[type="button"][value*="Commit" i]',
-        'text=Commit'
-      ],
-      'click Commit'
-    );
+    console.log('Step 10: Clicking Commit...');
+    await clickCommit(page);
 
     await page.waitForLoadState('domcontentloaded').catch(() => {});
-    await page.waitForTimeout(5000);
+    await page.waitForTimeout(3000);
 
-    await safeScreenshot(page, '07-after-commit.png');
+    await screenshot(page, '10-commit-clicked.png');
+    await writeLog('10-commit-clicked.txt', await getBodyText(page));
 
-    console.log('Waiting for deployment completion...');
+    console.log('Step 11: Waiting for deployment completion...');
+    await waitForDeploymentCompletion(page);
 
-    for (let attempt = 1; attempt <= 60; attempt++) {
-      const bodyText = await getPageText(page);
-
-      if (/error|failed|failure|exception/i.test(bodyText)) {
-        console.log('Deployment page text:');
-        console.log(bodyText);
-        throw new Error('Deployment failed after commit. Please check logs and screenshot.');
-      }
-
-      if (/complete|completed|success|successful/i.test(bodyText)) {
-        console.log('Deployment completed successfully.');
-        console.log('Final page text:');
-        console.log(bodyText);
-        await safeScreenshot(page, '08-deployment-complete.png');
-        return;
-      }
-
-      await page.waitForTimeout(5000);
-    }
-
-    const finalText = await getPageText(page);
-    console.log('Final page text:');
-    console.log(finalText);
-
-    await safeScreenshot(page, '08-final-state.png');
-
-    console.log('Commit was clicked, but completion text was not clearly detected. Please review screenshot/artifacts.');
+    console.log('Deployment automation completed successfully.');
   } catch (error) {
     console.error(`Deployment automation failed: ${error.message}`);
-    await safeScreenshot(page, 'error-state.png');
 
-    const pageText = await getPageText(page);
-    console.log('Page text at failure:');
-    console.log(pageText);
+    await screenshot(page, 'error-final-state.png');
+    await writeLog('error-final-page-text.txt', await getBodyText(page));
+    await writeLog('error-message.txt', error.stack || error.message);
 
     throw error;
   } finally {
