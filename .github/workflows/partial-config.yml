@@ -64,18 +64,16 @@ jobs:
 
           #  Filter out .yml / .yaml files
           grep -v -E '\.ya?ml$' all_changed_files.txt > changed_files.txt
-		  
-	  - name: Verify changed files
-        run: |
-		  echo "Filtered changed files:"
-          cat changed_files.txt
-		  
-		  if [ ! -s changed_files.txt ]; then
-			echo "No changed files found."
-			exit 1
-		  fi
 
-          
+      - name: Verify changed files
+        run: |
+          echo "Changed files:"
+          echo "Changed files:"
+
+          if [ ! -s changed_files.txt ]; then
+            echo "No files found for deployment."
+            exit 1
+          fi
           
 #  Create partial-config.zip
       - name: Create partial-config.zip
@@ -86,12 +84,13 @@ jobs:
       - name: Prepare final artifact folder
         run: |
           mkdir generated-config
-          #mv partial-config.zip generated-config/
-          #mv changed_files.txt generated-config/
-          #mv all_changed_files.txt generated-config/
-		  cp partial-config.zip generated-config/
+          # mv partial-config.zip generated-config/
+          # mv changed_files.txt generated-config/
+          # mv all_changed_files.txt generated-config/
+          cp partial-config.zip generated-config/
           cp changed_files.txt generated-config/
           cp all_changed_files.txt generated-config/
+
 
 #  Upload single artifact (GitHub will zip this)
       - name: Upload final artifact
