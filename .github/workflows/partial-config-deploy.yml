@@ -1,112 +1,67 @@
-name: Partial Config Build and Deploy
+name: Generate Partial Config ZIP
 
 on:
   pull_request:
-    types:
-      - closed
+    types: [closed]
     branches:
-      - 'FLOW_CSC_SSC_WATSON_SMP20_*_REL_*'
-      - '*_REL_*'
-
-  workflow_dispatch:
-    inputs:
-      release_branch:
-        description: 'Release branch name'
-        required: true
-        type: string
-      deploy_environment:
-        description: 'Target environment'
-        required: true
-        default: 'qa'
-        type: choice
-        options:
-          - qa
-          - cert
-          - prod
-
-permissions:
-  contents: read
-  actions: read
+      - '*REL*'   #  matches ALL release branches
 
 jobs:
-  prepare-partial-config:
-    name: Prepare Partial Config ZIP
-    if: >
-      github.event_name == 'workflow_dispatch' ||
-      (github.event.pull_request.merged == true)
+  generate-config:
+    if: github.event.pull_request.merged == true
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout release branch
+      - name: Checkout target branch
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.release_branch || github.base_ref }}
 
-      - name: Fetch master branch
+      - name: Fetch master and target branch
         run: |
           git fetch origin master
+          git fetch origin ${{ github.event.pull_request.base.ref }}
 
-      - name: Identify changed files between master and release branch
-        shell: bash
+      - name: Get changed files (target vs master)
         run: |
-          echo "Current branch:"
-          git branch --show-current
+          TARGET_BRANCH=${{ github.event.pull_request.base.ref }}
 
-          echo "Finding changed files between origin/master and current release branch..."
+          echo "Using branch: $TARGET_BRANCH"
 
-          git diff --name-only origin/master HEAD \
-            | grep -v '^.github/' \
-            | grep -v '^deployment/' \
-            | grep -v '\.yml$' \
-            | grep -v '\.yaml$' \
-            > changed_files.txt || true
+          #  All changed files (unfiltered)
+          git diff --name-only --diff-filter=ACMRT origin/master...origin/$TARGET_BRANCH > all_changed_files.txt
 
-          echo "Changed files:"
-          cat changed_files.txt || true
+          #  Filter out .yml / .yaml files
+          grep -v -E '\.ya?ml$' all_changed_files.txt > changed_files.txt
 
-          cp changed_files.txt all_changed_files.txt
-
-          if [ ! -s changed_files.txt ]; then
-            echo "No changed files found. Stopping."
-            exit 1
-          fi
-
+          echo "Filtered changed files:"
+          cat changed_files.txt
+          
+#  Create partial-config.zip
       - name: Create partial-config.zip
-        shell: bash
         run: |
-          rm -f partial-config.zip
+          zip -@ partial-config.zip < changed_files.txt
+          
+#  Create final folder structure
+      - name: Prepare final artifact folder
+        run: |
+          mkdir generated-config
+          mv partial-config.zip generated-config/
+          mv changed_files.txt generated-config/
+          mv all_changed_files.txt generated-config/
 
-          while IFS= read -r file; do
-            if [ -f "$file" ]; then
-              echo "Adding file: $file"
-              zip -r partial-config.zip "$file"
-            elif [ -d "$file" ]; then
-              echo "Adding directory: $file"
-              zip -r partial-config.zip "$file"
-            else
-              echo "Skipping missing path: $file"
-            fi
-          done < changed_files.txt
-
-          echo "ZIP content:"
-          unzip -l partial-config.zip
-
-      - name: Upload generated config artifact
+#  Upload single artifact (GitHub will zip this)
+      - name: Upload final artifact
         uses: actions/upload-artifact@v4
         with:
           name: generated-config
-          path: |
-            partial-config.zip
-            changed_files.txt
-            all_changed_files.txt
-          if-no-files-found: error
+          path: generated-config
 
-  deploy-partial-config:
+          
+deploy-partial-config:
     name: Deploy Partial Config to Configuration Manager
     needs: prepare-partial-config
 
-    # Use ubuntu-latest only if GitHub-hosted runner can access Nokia config URL.
     # If URL requires VPN/internal network, replace with: runs-on: self-hosted
     runs-on: ubuntu-latest
 
