@@ -369,6 +369,7 @@ async function main() {
     await clickFirstVisible(
       page,
       [
+        'input[type="submit"]',
         'button:has-text("SIGN IN")',
         'button:has-text("Sign In")',
         'button:has-text("Login")',
