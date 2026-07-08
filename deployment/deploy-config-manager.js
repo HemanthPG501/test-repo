@@ -370,39 +370,59 @@ async function handleConfigurationLock(page) {
 
   }
 
-  try {
 
-    console.log(
-      'Clicking Submit button...'
-    );
 
-    await page.locator(
-      'button.hdm-button'
+console.log(
+    'Clicking Submit button...'
+);
+
+await Promise.race([
+
+    page.waitForNavigation({
+        timeout: 45000,
+        waitUntil: 'domcontentloaded'
+    }).catch(() => null),
+
+    page.locator(
+        'button.hdm-button'
     ).first().click({
-      force: true
-    });
+        force: true
+    })
 
-  } catch (submitError) {
+]);
 
-    console.log(
-      `Submit button click failed: ${submitError.message}`
-    );
+console.log(
+    'Waiting 40 seconds for lock release...'
+);
 
-    console.log(
-      'Trying form submit fallback...'
-    );
+await page.waitForTimeout(40000);
 
-    await page.evaluate(() => {
 
-      const form = document.forms[0];
+console.log(
+  `Current URL after lock release: ${page.url()}`
+);
 
-      if (form) {
-        form.submit();
-      }
+await screenshot(
+  page,
+  '04d-after-lock-release-final.png'
+);
 
-    });
+writeLog(
+  '04d-after-lock-release-final.txt',
+  await getFullPageText(page)
+);
 
-  }
+
+await page.waitForLoadState(
+    'domcontentloaded'
+).catch(() => {});
+
+await page.waitForLoadState(
+    'networkidle',
+    { timeout: 30000 }
+).catch(() => {});
+
+
 
   await waitForPageStable(
     page,
