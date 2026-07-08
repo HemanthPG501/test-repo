@@ -85,7 +85,7 @@ async function getFullPageText(page) {
     output += `MAIN PAGE TITLE: ${await page.title().catch(() => '')}\n\n`;
     output += `MAIN PAGE BODY:\n${await getBodyTextFromContext(page)}\n\n`;
   } catch {
-    // Ignore
+    // Ignore main page text errors
   }
 
   const frames = page.frames();
@@ -109,6 +109,7 @@ async function dumpPageDebugInfo(page, prefix) {
 
   debug.url = page.url();
   debug.title = await page.title().catch(() => '');
+
   debug.frames = page.frames().map((frame, index) => ({
     index,
     url: frame.url()
@@ -121,7 +122,9 @@ async function dumpPageDebugInfo(page, prefix) {
       type: input.type || '',
       value: input.type === 'password' ? '********' : input.value || '',
       placeholder: input.getAttribute('placeholder') || '',
-      className: input.className || ''
+      className: input.className || '',
+      disabled: input.disabled || false,
+      outerHTML: input.outerHTML || ''
     }))
   ).catch(error => [{ error: error.message }]);
 
@@ -131,7 +134,9 @@ async function dumpPageDebugInfo(page, prefix) {
       name: button.name || '',
       text: button.innerText || button.textContent || '',
       type: button.type || '',
-      className: button.className || ''
+      className: button.className || '',
+      disabled: button.disabled || false,
+      outerHTML: button.outerHTML || ''
     }))
   ).catch(error => [{ error: error.message }]);
 
@@ -140,7 +145,8 @@ async function dumpPageDebugInfo(page, prefix) {
       id: link.id || '',
       text: link.innerText || link.textContent || '',
       href: link.href || '',
-      className: link.className || ''
+      className: link.className || '',
+      outerHTML: link.outerHTML || ''
     }))
   ).catch(error => [{ error: error.message }]);
 
@@ -166,6 +172,34 @@ async function waitForPageStable(page, milliseconds = 3000) {
   await page.waitForLoadState('domcontentloaded').catch(() => {});
   await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
   await page.waitForTimeout(milliseconds);
+}
+
+async function typeLikeUser(page, selector, value, fieldName) {
+  const locator = page.locator(selector).first();
+
+  await locator.waitFor({
+    state: 'visible',
+    timeout: 15000
+  });
+
+  await locator.click({ force: true });
+
+  await locator.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A').catch(() => {});
+  await locator.press('Backspace').catch(() => {});
+
+  await locator.type(value, {
+    delay: 80
+  });
+
+  await locator.evaluate(element => {
+    element.dispatchEvent(new Event('input', { bubbles: true }));
+    element.dispatchEvent(new Event('change', { bubbles: true }));
+    element.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true }));
+    element.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true }));
+    element.blur();
+  });
+
+  console.log(`Completed: typed ${fieldName} using selector: ${selector}`);
 }
 
 async function fillFirstVisibleInAnyContext(page, selectors, value, stepName) {
@@ -224,7 +258,9 @@ async function clickTextByJavaScriptInAnyContext(page, exactText, stepName) {
       const clicked = await context.evaluate(textToFind => {
         const normalize = value => (value || '').replace(/\s+/g, ' ').trim();
 
-        const elements = Array.from(document.querySelectorAll('a, button, input, div, span, td, li'));
+        const elements = Array.from(
+          document.querySelectorAll('a, button, input, div, span, td, li')
+        );
 
         const exactCandidate = elements.find(element => {
           const visibleText =
@@ -311,13 +347,9 @@ async function clickUploadNewConfiguration(page) {
     console.log(`JavaScript text click failed: ${secondError.message}`);
   }
 
-  const currentUrl = page.url();
-
-  if (!currentUrl.toLowerCase().includes('upload')) {
-    console.log('Unable to click menu item. Current page debug information has been stored.');
-  }
-
-  throw new Error('Unable to click Upload New Configuration. Check before-click-upload-new-configuration-debug.json and screenshots.');
+  throw new Error(
+    'Unable to click Upload New Configuration. Check before-click-upload-new-configuration-debug.json and screenshots.'
+  );
 }
 
 async function uploadZip(page, absoluteZipPath) {
@@ -586,86 +618,186 @@ async function loginToConfigurationManager(page) {
   });
 
   await waitForPageStable(page, 2000);
+
   await screenshot(page, '01-login-page.png');
   writeLog('01-login-page.txt', await getFullPageText(page));
   await dumpPageDebugInfo(page, '01-login-page');
 
-  console.log('Step 2: Filling login credentials using exact Nokia login selectors...');
+  console.log('Step 2: Filling login credentials using real typing events...');
 
   await page.waitForSelector('#kc-form-login', {
     state: 'attached',
     timeout: 15000
   }).catch(() => {
-    console.log('Login form #kc-form-login not found. Continuing with field selectors.');
+    console.log('Login form #kc-form-login not found immediately. Continuing with field selectors.');
   });
 
-  await fillFirstVisibleInAnyContext(
+  await typeLikeUser(
     page,
-    [
-      '#target2',
-      'input#target2',
-      'input[name="username"]',
-      'input[placeholder="Username"]',
-      'input[type="text"]'
-    ],
+    '#target2',
     CONFIG_MANAGER_USERNAME,
-    'fill username'
+    'username'
   );
 
-  await fillFirstVisibleInAnyContext(
+  await typeLikeUser(
     page,
-    [
-      '#login-password',
-      'input#login-password',
-      'input[name="password"]',
-      'input[placeholder="Password"]',
-      'input[type="password"]'
-    ],
+    '#login-password',
     CONFIG_MANAGER_PASS,
-    'fill password'
+    'password'
   );
 
   await screenshot(page, '02-login-filled.png');
+  writeLog('02-login-filled.txt', await getFullPageText(page));
 
-  console.log('Step 3: Clicking SIGN IN using exact selector #sbtbtn...');
+  console.log('Checking SIGN IN button state after typing...');
 
-  const signInButtonCount = await page.locator('#sbtbtn').count().catch(() => 0);
-  console.log(`SIGN IN button count on main page: ${signInButtonCount}`);
+  const signInStateBefore = await page.locator('#sbtbtn').evaluate(button => ({
+    id: button.id,
+    name: button.name,
+    type: button.type,
+    value: button.value,
+    disabled: button.disabled,
+    className: button.className,
+    outerHTML: button.outerHTML
+  })).catch(error => ({
+    error: error.message
+  }));
+
+  writeLog('03-signin-button-before-click.json', JSON.stringify(signInStateBefore, null, 2));
+
+  console.log(`SIGN IN disabled before click: ${signInStateBefore.disabled}`);
+  console.log(`SIGN IN class before click: ${signInStateBefore.className}`);
 
   await screenshot(page, '03-before-signin.png');
 
+  console.log('Step 3: Clicking SIGN IN...');
+
+  let loginSubmitted = false;
+
   try {
-    await page.waitForSelector('#sbtbtn', {
-      state: 'visible',
+    await page.waitForFunction(() => {
+      const button = document.querySelector('#sbtbtn');
+      return button && !button.disabled;
+    }, {
       timeout: 10000
     });
 
+    console.log('SIGN IN button is enabled. Clicking normally...');
+
     await Promise.all([
       page.waitForLoadState('domcontentloaded').catch(() => {}),
-      page.locator('#sbtbtn').click({ timeout: 10000 })
+      page.locator('#sbtbtn').click({ timeout: 15000 })
     ]);
-  } catch (normalClickError) {
-    console.log(`Normal #sbtbtn click failed: ${normalClickError.message}`);
-    console.log('Trying forced click on #sbtbtn...');
 
+    loginSubmitted = true;
+  } catch (enabledClickError) {
+    console.log(`SIGN IN button did not become enabled or normal click failed: ${enabledClickError.message}`);
+  }
+
+  if (!loginSubmitted) {
     try {
-      await page.locator('#sbtbtn').click({
-        force: true,
-        timeout: 10000
-      });
-    } catch (forceClickError) {
-      console.log(`Forced #sbtbtn click failed: ${forceClickError.message}`);
-      console.log('Trying JavaScript click on #sbtbtn...');
+      console.log('Trying extra validation events before forced click...');
 
-      await page.locator('#sbtbtn').evaluate(button => button.click());
+      await page.evaluate(() => {
+        const username = document.querySelector('#target2');
+        const password = document.querySelector('#login-password');
+        const button = document.querySelector('#sbtbtn');
+
+        for (const element of [username, password]) {
+          if (element) {
+            element.dispatchEvent(new Event('input', { bubbles: true }));
+            element.dispatchEvent(new Event('change', { bubbles: true }));
+            element.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true }));
+            element.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true }));
+            element.blur();
+          }
+        }
+
+        if (button) {
+          button.disabled = false;
+          button.removeAttribute('disabled');
+          button.className = 'buttonEnabled';
+        }
+      });
+
+      await screenshot(page, '03b-before-forced-signin.png');
+
+      await Promise.all([
+        page.waitForLoadState('domcontentloaded').catch(() => {}),
+        page.locator('#sbtbtn').click({ force: true, timeout: 15000 })
+      ]);
+
+      loginSubmitted = true;
+    } catch (forceClickError) {
+      console.log(`Forced SIGN IN click failed: ${forceClickError.message}`);
     }
   }
 
-  await waitForPageStable(page, 5000);
+  if (!loginSubmitted) {
+    try {
+      console.log('Trying direct form submission using #kc-form-login.submit()...');
+
+      await page.evaluate(() => {
+        const username = document.querySelector('#target2');
+        const password = document.querySelector('#login-password');
+        const button = document.querySelector('#sbtbtn');
+        const form = document.querySelector('#kc-form-login');
+
+        for (const element of [username, password]) {
+          if (element) {
+            element.dispatchEvent(new Event('input', { bubbles: true }));
+            element.dispatchEvent(new Event('change', { bubbles: true }));
+            element.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true }));
+            element.blur();
+          }
+        }
+
+        if (button) {
+          button.disabled = false;
+          button.removeAttribute('disabled');
+          button.className = 'buttonEnabled';
+        }
+
+        if (!form) {
+          throw new Error('Login form #kc-form-login not found.');
+        }
+
+        form.submit();
+      });
+
+      await page.waitForLoadState('domcontentloaded').catch(() => {});
+      loginSubmitted = true;
+    } catch (formSubmitError) {
+      console.log(`Direct form submit failed: ${formSubmitError.message}`);
+    }
+  }
+
+  await waitForPageStable(page, 7000);
 
   await screenshot(page, '04-after-login.png');
   writeLog('04-after-login.txt', await getFullPageText(page));
   await dumpPageDebugInfo(page, '04-after-login');
+
+  const currentUrl = page.url();
+  const finalText = await getFullPageText(page);
+
+  console.log(`URL after login: ${currentUrl}`);
+
+  const stillOnLoginPage =
+    currentUrl.includes('/auth/realms/') ||
+    /SIGN IN/i.test(finalText) ||
+    (/Username/i.test(finalText) && /Password/i.test(finalText));
+
+  if (stillOnLoginPage) {
+    await screenshot(page, 'login-failed-still-on-login-page.png');
+    writeLog('login-failed-current-page.txt', finalText);
+
+    throw new Error(
+      'Login did not complete successfully. Still on login/auth page after submitting credentials. Check login-failed-still-on-login-page.png and login-failed-current-page.txt.'
+    );
+  }
+
+  console.log('Login completed successfully. Proceeding to Configuration Manager application page.');
 }
 
 async function main() {
@@ -704,7 +836,9 @@ async function main() {
   });
 
   page.on('requestfailed', request => {
-    console.log(`REQUEST FAILED: ${request.method()} ${request.url()} - ${request.failure()?.errorText || ''}`);
+    console.log(
+      `REQUEST FAILED: ${request.method()} ${request.url()} - ${request.failure()?.errorText || ''}`
+    );
   });
 
   try {
@@ -714,6 +848,7 @@ async function main() {
     await clickUploadNewConfiguration(page);
 
     await waitForPageStable(page, 3000);
+
     await screenshot(page, '05-upload-new-configuration-page.png');
     writeLog('05-upload-new-configuration-page.txt', await getFullPageText(page));
     await dumpPageDebugInfo(page, '05-upload-new-configuration-page');
