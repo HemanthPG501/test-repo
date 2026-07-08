@@ -376,7 +376,6 @@ console.log(
     'Clicking Submit button...'
 );
 
-
 await page.locator(
     'button.hdm-button'
 ).first().click({
@@ -385,7 +384,7 @@ await page.locator(
 });
 
 console.log(
-    'Submit button clicked.'
+    'Submit button clicked successfully.'
 );
 
 console.log(
@@ -396,52 +395,25 @@ await page.waitForTimeout(
     45000
 );
 
-
 console.log(
-    'Waiting 40 seconds for lock release...'
-);
-
-await page.waitForTimeout(40000);
-
-
-console.log(
-  `Current URL after lock release: ${page.url()}`
+    `Current URL after lock release: ${page.url()}`
 );
 
 await screenshot(
-  page,
-  '04d-after-lock-release-final.png'
+    page,
+    '04d-after-lock-release-final.png'
 );
 
 writeLog(
-  '04d-after-lock-release-final.txt',
-  await getFullPageText(page)
+    '04d-after-lock-release-final.txt',
+    await getFullPageText(page)
 );
 
-
-await page.waitForTimeout(45000);
-
-
-
-  await waitForPageStable(
+await dumpPageDebugInfo(
     page,
-    5000
-  );
+    '04d-after-lock-release-final'
+);
 
-  await screenshot(
-    page,
-    '04c-after-break-lock-submit.png'
-  );
-
-  writeLog(
-    '04c-after-break-lock-submit.txt',
-    await getFullPageText(page)
-  );
-
-  await dumpPageDebugInfo(
-    page,
-    '04c-after-break-lock-submit'
-  );
 
   console.log(
     'Lock screen successfully handled.'
@@ -450,252 +422,160 @@ await page.waitForTimeout(45000);
 
 
 
-/*
-async function clickUploadNewConfiguration(page) {
-  console.log('Trying to click Upload New Configuration...');
-
-  await dumpPageDebugInfo(page, 'before-click-upload-new-configuration');
-
-  const uploadSelectors = [
-    'text=Upload New Configuration',
-    'a:has-text("Upload New Configuration")',
-    'button:has-text("Upload New Configuration")',
-    'td:has-text("Upload New Configuration")',
-    'div:has-text("Upload New Configuration")',
-    'span:has-text("Upload New Configuration")',
-    'li:has-text("Upload New Configuration")',
-    '[href*="upload" i]',
-    '[onclick*="upload" i]',
-    '[id*="upload" i]',
-    '[class*="upload" i]'
-  ];
-
-  try {
-    await clickFirstVisibleInAnyContext(
-      page,
-      uploadSelectors,
-      'click Upload New Configuration'
-    );
-    return;
-  } catch (firstError) {
-    console.log(`Normal selector click failed: ${firstError.message}`);
-  }
-
-  try {
-    await clickTextByJavaScriptInAnyContext(
-      page,
-      'Upload New Configuration',
-      'click Upload New Configuration'
-    );
-    return;
-  } catch (secondError) {
-    console.log(`JavaScript text click failed: ${secondError.message}`);
-  }
-
-  throw new Error(
-    'Unable to click Upload New Configuration. Check before-click-upload-new-configuration-debug.json and screenshots.'
-  );
-}
-*/
-
 async function clickUploadNewConfiguration(page) {
 
-  console.log(
-    'Trying to click Upload New Configuration...'
-  );
-
-  const pageText =
-    await getFullPageText(page);
-
-  writeLog(
-    'before-upload-page.txt',
-    pageText
-  );
-
-  await dumpPageDebugInfo(
-    page,
-    'before-upload'
-  );
-
-  const uploadSelectors = [
-
-    'text=Upload New Configuration',
-
-    'a:has-text("Upload New Configuration")',
-
-    'span:has-text("Upload New Configuration")',
-
-    'td:has-text("Upload New Configuration")',
-
-    'div:has-text("Upload New Configuration")',
-
-    'li:has-text("Upload New Configuration")',
-
-    '[href*="Upload" i]',
-
-    '[href*="upload" i]',
-
-    '[id*="Upload" i]',
-
-    '[id*="upload" i]',
-
-    '[class*="Upload" i]',
-
-    '[class*="upload" i]'
-  ];
-
-  try {
-
-    await clickFirstVisibleInAnyContext(
-      page,
-      uploadSelectors,
-      'click Upload New Configuration'
+    console.log(
+        'Step 4: Clicking Upload New Configuration...'
     );
 
-    return;
+    const leftFrame =
+        page.frames().find(
+            frame =>
+                frame.url().includes(
+                    'leftNav'
+                )
+        );
 
-  } catch (firstError) {
+    if (!leftFrame) {
+
+        throw new Error(
+            'leftNav frame not found.'
+        );
+
+    }
+
+    await leftFrame.locator(
+        'table.dashboardItem'
+    ).filter({
+        hasText:
+        'Upload New Configuration'
+    }).click();
 
     console.log(
-      `Normal selector click failed: ${firstError.message}`
+        'Upload New Configuration clicked.'
     );
 
-  }
-
-  try {
-
-    await clickTextByJavaScriptInAnyContext(
-      page,
-      'Upload New Configuration',
-      'click Upload New Configuration'
+    await page.waitForTimeout(
+        5000
     );
 
-    return;
-
-  } catch (secondError) {
-
-    console.log(
-      `JavaScript click failed: ${secondError.message}`
+    await screenshot(
+        page,
+        '05-upload-menu-clicked.png'
     );
 
-  }
-
-  throw new Error(
-    'Unable to locate Upload New Configuration menu.'
-  );
+    writeLog(
+        '05-upload-menu-clicked.txt',
+        await getFullPageText(page)
+    );
 }
+
+
 
 
 
 async function uploadZip(page, absoluteZipPath) {
-  const uploadSelectors = [
-    'input[type="file"]',
-    'input[name*="file" i]',
-    'input[id*="file" i]',
-    'input[name*="zip" i]',
-    'input[id*="zip" i]',
-    'input[name*="upload" i]',
-    'input[id*="upload" i]'
-  ];
 
-  const contexts = getSearchContexts(page);
+    console.log(
+        'Uploading ZIP file...'
+    );
 
-  for (const context of contexts) {
-    for (const selector of uploadSelectors) {
-      try {
-        const locator = context.locator(selector).first();
-        await locator.waitFor({ state: 'attached', timeout: 10000 });
-        await locator.setInputFiles(absoluteZipPath);
-        console.log(`ZIP file selected using selector: ${selector}`);
-        console.log(`Context URL: ${context.url ? context.url() : page.url()}`);
-        return;
-      } catch {
-        // Try next selector/context
-      }
-    }
-  }
+    await page.waitForSelector(
+        '#uploadedFile',
+        {
+            timeout: 15000
+        }
+    );
 
-  throw new Error('Unable to find file input for ZIP upload.');
+    await page.locator(
+        '#uploadedFile'
+    ).setInputFiles(
+        absoluteZipPath
+    );
+
+    console.log(
+        `ZIP uploaded: ${absoluteZipPath}`
+    );
+
+    await screenshot(
+        page,
+        '06-zip-selected.png'
+    );
+
+    writeLog(
+        '06-zip-selected.txt',
+        await getFullPageText(page)
+    );
 }
 
 async function selectMergeOption(page) {
-  const mergeSelectors = [
-    'label:has-text("Merge active config with config in .zip file")',
-    'text=Merge active config with config in .zip file',
-    'input[type="radio"][value*="merge" i]',
-    'input[type="radio"][name*="merge" i]'
-  ];
 
-  const contexts = getSearchContexts(page);
+    console.log(
+        'Selecting Merge configuration option...'
+    );
 
-  for (const context of contexts) {
-    for (const selector of mergeSelectors) {
-      try {
-        const locator = context.locator(selector).first();
-        await locator.waitFor({ state: 'visible', timeout: 7000 });
-
-        const tagName = await locator.evaluate(el => el.tagName.toLowerCase()).catch(() => '');
-
-        if (tagName === 'input') {
-          await locator.check({ force: true });
-        } else {
-          await locator.click({ force: true });
+    await page.waitForSelector(
+        '#mergeChoice1',
+        {
+            timeout: 15000
         }
+    );
 
-        console.log(`Merge option selected using selector: ${selector}`);
-        console.log(`Context URL: ${context.url ? context.url() : page.url()}`);
-        return;
-      } catch {
-        // Try next selector/context
-      }
-    }
-  }
+    await page.locator(
+        '#mergeChoice1'
+    ).check({
+        force: true
+    });
 
-  console.log('Trying fallback radio-button selection. Selecting first visible radio button as merge option.');
+    await screenshot(
+        page,
+        '07-merge-option-selected.png'
+    );
 
-  for (const context of contexts) {
-    try {
-      const firstRadio = context.locator('input[type="radio"]').first();
-      await firstRadio.waitFor({ state: 'visible', timeout: 7000 });
-      await firstRadio.check({ force: true });
-      console.log('Merge option selected using first available radio button.');
-      return;
-    } catch {
-      // Try next context
-    }
-  }
+    writeLog(
+        '07-merge-option-selected.txt',
+        await getFullPageText(page)
+    );
 
-  throw new Error('Unable to select Merge option.');
+    console.log(
+        'Merge option selected.'
+    );
 }
 
 async function fillDescriptionIfAvailable(page) {
-  const descriptionSelectors = [
-    'textarea[name*="description" i]',
-    'textarea[id*="description" i]',
-    'textarea',
-    'input[name*="description" i]',
-    'input[id*="description" i]'
-  ];
 
-  const contexts = getSearchContexts(page);
+    console.log(
+        'Filling deployment description...'
+    );
 
-  for (const context of contexts) {
-    for (const selector of descriptionSelectors) {
-      try {
-        const locator = context.locator(selector).first();
-        await locator.waitFor({ state: 'visible', timeout: 5000 });
-        await locator.fill(DEPLOY_DESCRIPTION);
-        console.log(`Description filled using selector: ${selector}`);
-        console.log(`Context URL: ${context.url ? context.url() : page.url()}`);
-        return;
-      } catch {
-        // Try next selector/context
-      }
-    }
-  }
+    await page.waitForSelector(
+        '#description',
+        {
+            timeout: 15000
+        }
+    );
 
-  console.log('Description field not found. Continuing without description.');
+    await page.locator(
+        '#description'
+    ).fill(
+        DEPLOY_DESCRIPTION
+    );
+
+    await screenshot(
+        page,
+        '08-description-filled.png'
+    );
+
+    writeLog(
+        '08-description-filled.txt',
+        await getFullPageText(page)
+    );
+
+    console.log(
+        'Description updated.'
+    );
 }
+
 
 function hasFailureText(bodyText) {
   const text = bodyText || '';
@@ -720,6 +600,11 @@ function hasFailureText(bodyText) {
 
   return failurePatterns.some(pattern => pattern.test(safeText));
 }
+
+
+
+
+
 
 async function isCommitVisible(page) {
   const commitSelectors = [
@@ -761,6 +646,29 @@ async function waitForValidation(page) {
 
   for (let attempt = 1; attempt <= 90; attempt++) {
     const bodyText = await getFullPageText(page);
+	
+	if (
+    bodyText.includes(
+        'Errors found'
+    )
+) {
+
+    await screenshot(
+        page,
+        'validation-errors-found.png'
+    );
+
+    writeLog(
+        'validation-errors-found.txt',
+        bodyText
+    );
+
+    throw new Error(
+        'Validation failed. Errors found.'
+    );
+}
+
+
     writeLog(`validation-attempt-${attempt}.txt`, bodyText);
 
     if (hasFailureText(bodyText)) {
@@ -1111,17 +1019,29 @@ async function main() {
     writeLog('08-description-filled.txt', await getFullPageText(page));
 
     console.log('Step 8: Clicking Upload...');
-    await clickFirstVisibleInAnyContext(
-      page,
-      [
-        'button:has-text("Upload")',
-        'input[type="submit"][value*="Upload" i]',
-        'input[type="button"][value*="Upload" i]',
-        'a:has-text("Upload")',
-        'text=Upload'
-      ],
-      'click Upload'
-    );
+	
+	
+    await page.locator(
+    'input[type="submit"][value="Upload"]'
+).click({
+    force: true,
+    noWaitAfter: true
+});
+
+console.log(
+    'Upload button clicked.'
+);
+
+await screenshot(
+    page,
+    '09-upload-clicked.png'
+);
+
+await page.waitForTimeout(
+    10000
+);
+
+
 
     await waitForPageStable(page, 3000);
 
