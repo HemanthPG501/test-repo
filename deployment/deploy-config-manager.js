@@ -306,6 +306,132 @@ async function clickTextByJavaScriptInAnyContext(page, exactText, stepName) {
   throw new Error(`Failed step: ${stepName}. JavaScript text click did not find: ${exactText}`);
 }
 
+
+async function handleConfigurationLock(page) {
+
+  const pageText = await getFullPageText(page);
+
+  const lockDetected =
+    pageText.includes('Configuration Locked') ||
+    pageText.includes('Break all locks');
+
+  if (!lockDetected) {
+
+    console.log(
+      'No Configuration Lock screen detected.'
+    );
+
+    return;
+  }
+
+  console.log(
+    'Configuration Lock screen detected.'
+  );
+
+  await screenshot(
+    page,
+    '04a-configuration-lock-screen.png'
+  );
+
+  writeLog(
+    '04a-configuration-lock-screen.txt',
+    pageText
+  );
+
+  try {
+
+    console.log(
+      'Selecting Break all locks option...'
+    );
+
+    await page.waitForSelector(
+      '#breakLocks',
+      {
+        timeout: 10000
+      }
+    );
+
+    await page.locator(
+      '#breakLocks'
+    ).check({
+      force: true
+    });
+
+    await screenshot(
+      page,
+      '04b-break-lock-selected.png'
+    );
+
+  } catch (error) {
+
+    throw new Error(
+      `Unable to select Break all locks: ${error.message}`
+    );
+
+  }
+
+  try {
+
+    console.log(
+      'Clicking Submit button...'
+    );
+
+    await page.locator(
+      'button.hdm-button'
+    ).first().click({
+      force: true
+    });
+
+  } catch (submitError) {
+
+    console.log(
+      `Submit button click failed: ${submitError.message}`
+    );
+
+    console.log(
+      'Trying form submit fallback...'
+    );
+
+    await page.evaluate(() => {
+
+      const form = document.forms[0];
+
+      if (form) {
+        form.submit();
+      }
+
+    });
+
+  }
+
+  await waitForPageStable(
+    page,
+    5000
+  );
+
+  await screenshot(
+    page,
+    '04c-after-break-lock-submit.png'
+  );
+
+  writeLog(
+    '04c-after-break-lock-submit.txt',
+    await getFullPageText(page)
+  );
+
+  await dumpPageDebugInfo(
+    page,
+    '04c-after-break-lock-submit'
+  );
+
+  console.log(
+    'Lock screen successfully handled.'
+  );
+}
+
+
+
+/*
 async function clickUploadNewConfiguration(page) {
   console.log('Trying to click Upload New Configuration...');
 
@@ -351,6 +477,96 @@ async function clickUploadNewConfiguration(page) {
     'Unable to click Upload New Configuration. Check before-click-upload-new-configuration-debug.json and screenshots.'
   );
 }
+*/
+
+async function clickUploadNewConfiguration(page) {
+
+  console.log(
+    'Trying to click Upload New Configuration...'
+  );
+
+  const pageText =
+    await getFullPageText(page);
+
+  writeLog(
+    'before-upload-page.txt',
+    pageText
+  );
+
+  await dumpPageDebugInfo(
+    page,
+    'before-upload'
+  );
+
+  const uploadSelectors = [
+
+    'text=Upload New Configuration',
+
+    'a:has-text("Upload New Configuration")',
+
+    'span:has-text("Upload New Configuration")',
+
+    'td:has-text("Upload New Configuration")',
+
+    'div:has-text("Upload New Configuration")',
+
+    'li:has-text("Upload New Configuration")',
+
+    '[href*="Upload" i]',
+
+    '[href*="upload" i]',
+
+    '[id*="Upload" i]',
+
+    '[id*="upload" i]',
+
+    '[class*="Upload" i]',
+
+    '[class*="upload" i]'
+  ];
+
+  try {
+
+    await clickFirstVisibleInAnyContext(
+      page,
+      uploadSelectors,
+      'click Upload New Configuration'
+    );
+
+    return;
+
+  } catch (firstError) {
+
+    console.log(
+      `Normal selector click failed: ${firstError.message}`
+    );
+
+  }
+
+  try {
+
+    await clickTextByJavaScriptInAnyContext(
+      page,
+      'Upload New Configuration',
+      'click Upload New Configuration'
+    );
+
+    return;
+
+  } catch (secondError) {
+
+    console.log(
+      `JavaScript click failed: ${secondError.message}`
+    );
+
+  }
+
+  throw new Error(
+    'Unable to locate Upload New Configuration menu.'
+  );
+}
+
+
 
 async function uploadZip(page, absoluteZipPath) {
   const uploadSelectors = [
@@ -841,11 +1057,15 @@ async function main() {
     );
   });
 
-  try {
-    await loginToConfigurationManager(page);
+  try {	
+	await loginToConfigurationManager(page);
+	console.log(
+		'Checking Configuration Lock screen...'
+	);
+	await handleConfigurationLock(page);
+	console.log('Step 4: Clicking Upload New Configuration...');
+	await clickUploadNewConfiguration(page);
 
-    console.log('Step 4: Clicking Upload New Configuration...');
-    await clickUploadNewConfiguration(page);
 
     await waitForPageStable(page, 3000);
 
