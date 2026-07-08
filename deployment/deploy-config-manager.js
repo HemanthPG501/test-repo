@@ -369,13 +369,19 @@ async function main() {
 
     console.log('Step 3: Clicking SIGN IN...');
     
-
+    
     await page.waitForSelector('#sbtbtn', {
       state: 'visible',
       timeout: 10000
     });
     await screenshot(page, '03-before-signin.png');
-    await page.locator('#sbtbtn').click();
+    
+    // await page.locator('#sbtbtn').click();
+    await page.locator('#sbtbtn').evaluate(el => el.click());
+    const signInExists = await page.locator('#sbtbtn').count();
+    console.log(`SIGN IN button count: ${signInExists}`);
+
+    
     await page.waitForLoadState('networkidle');
     await page.waitForTimeout(5000);
     await screenshot(page, '04-after-login.png');
