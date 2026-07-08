@@ -472,22 +472,27 @@ async function clickUploadNewConfiguration(page) {
 
 
 
-
-
 async function uploadZip(page, absoluteZipPath) {
 
     console.log(
         'Uploading ZIP file...'
     );
 
-    await page.waitForSelector(
-        '#uploadedFile',
-        {
-            timeout: 15000
-        }
-    );
+    const mainFrame =
+        page.frames().find(
+            frame =>
+                frame.url().includes('/config/internal/')
+        );
 
-    await page.locator(
+    if (!mainFrame) {
+
+        throw new Error(
+            'Main upload frame not found.'
+        );
+
+    }
+
+    await mainFrame.locator(
         '#uploadedFile'
     ).setInputFiles(
         absoluteZipPath
@@ -508,20 +513,28 @@ async function uploadZip(page, absoluteZipPath) {
     );
 }
 
+
 async function selectMergeOption(page) {
 
     console.log(
         'Selecting Merge configuration option...'
     );
 
-    await page.waitForSelector(
-        '#mergeChoice1',
-        {
-            timeout: 15000
-        }
-    );
+    const mainFrame =
+        page.frames().find(
+            frame =>
+                frame.url().includes('/config/internal/')
+        );
 
-    await page.locator(
+    if (!mainFrame) {
+
+        throw new Error(
+            'Main upload frame not found.'
+        );
+
+    }
+
+    await mainFrame.locator(
         '#mergeChoice1'
     ).check({
         force: true
@@ -542,20 +555,28 @@ async function selectMergeOption(page) {
     );
 }
 
+
 async function fillDescriptionIfAvailable(page) {
 
     console.log(
         'Filling deployment description...'
     );
 
-    await page.waitForSelector(
-        '#description',
-        {
-            timeout: 15000
-        }
-    );
+    const mainFrame =
+        page.frames().find(
+            frame =>
+                frame.url().includes('/config/internal/')
+        );
 
-    await page.locator(
+    if (!mainFrame) {
+
+        throw new Error(
+            'Main upload frame not found.'
+        );
+
+    }
+
+    await mainFrame.locator(
         '#description'
     ).fill(
         DEPLOY_DESCRIPTION
@@ -647,11 +668,15 @@ async function waitForValidation(page) {
   for (let attempt = 1; attempt <= 90; attempt++) {
     const bodyText = await getFullPageText(page);
 	
-	if (
-    bodyText.includes(
-        'Errors found'
+
+if (
+    /errors found/i.test(
+        bodyText
     )
-) {
+)
+ 
+
+{
 
     await screenshot(
         page,
@@ -1021,7 +1046,13 @@ async function main() {
     console.log('Step 8: Clicking Upload...');
 	
 	
-    await page.locator(
+const mainFrame =
+    page.frames().find(
+        frame =>
+            frame.url().includes('/config/internal/')
+    );
+
+await mainFrame.locator(
     'input[type="submit"][value="Upload"]'
 ).click({
     force: true,
@@ -1038,7 +1069,7 @@ await screenshot(
 );
 
 await page.waitForTimeout(
-    10000
+    20000
 );
 
 
