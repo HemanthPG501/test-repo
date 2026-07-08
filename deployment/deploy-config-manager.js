@@ -478,11 +478,21 @@ async function uploadZip(page, absoluteZipPath) {
         'Uploading ZIP file...'
     );
 
-    const mainFrame =
-        page.frames().find(
-            frame =>
-                frame.url().includes('/config/internal/')
-        );
+const mainFrame =
+    page.frames().find(
+        frame =>
+            frame.url().includes(
+                'zipUploadInput'
+            )
+    );
+
+if (!mainFrame) {
+
+    throw new Error(
+        'zipUploadInput frame not found.'
+    );
+
+}
 
     if (!mainFrame) {
 
@@ -523,7 +533,7 @@ async function selectMergeOption(page) {
     const mainFrame =
         page.frames().find(
             frame =>
-                frame.url().includes('/config/internal/')
+                frame.url().includes('zipUploadInput')
         );
 
     if (!mainFrame) {
@@ -565,7 +575,7 @@ async function fillDescriptionIfAvailable(page) {
     const mainFrame =
         page.frames().find(
             frame =>
-                frame.url().includes('/config/internal/')
+                frame.url().includes('zipUploadInput')
         );
 
     if (!mainFrame) {
@@ -1052,12 +1062,30 @@ const mainFrame =
             frame.url().includes('/config/internal/')
     );
 
+const mainFrame =
+    page.frames().find(
+        frame =>
+            frame.url().includes(
+                'zipUploadInput'
+            )
+    );
+
 await mainFrame.locator(
     'input[type="submit"][value="Upload"]'
 ).click({
     force: true,
     noWaitAfter: true
 });
+
+
+console.log('Available frames:');
+for (const frame of page.frames()) {
+
+    console.log(
+        frame.url()
+    );
+
+}
 
 console.log(
     'Upload button clicked.'
