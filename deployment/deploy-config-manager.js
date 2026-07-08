@@ -376,20 +376,26 @@ console.log(
     'Clicking Submit button...'
 );
 
-await Promise.race([
 
-    page.waitForNavigation({
-        timeout: 45000,
-        waitUntil: 'domcontentloaded'
-    }).catch(() => null),
+await page.locator(
+    'button.hdm-button'
+).first().click({
+    force: true,
+    noWaitAfter: true
+});
 
-    page.locator(
-        'button.hdm-button'
-    ).first().click({
-        force: true
-    })
+console.log(
+    'Submit button clicked.'
+);
 
-]);
+console.log(
+    'Waiting 45 seconds for lock release...'
+);
+
+await page.waitForTimeout(
+    45000
+);
+
 
 console.log(
     'Waiting 40 seconds for lock release...'
@@ -413,14 +419,7 @@ writeLog(
 );
 
 
-await page.waitForLoadState(
-    'domcontentloaded'
-).catch(() => {});
-
-await page.waitForLoadState(
-    'networkidle',
-    { timeout: 30000 }
-).catch(() => {});
+await page.waitForTimeout(45000);
 
 
 
