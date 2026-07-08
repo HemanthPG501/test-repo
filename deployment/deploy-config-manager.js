@@ -365,21 +365,24 @@ async function main() {
 
     await screenshot(page, '02-login-filled.png');
 
+
+
     console.log('Step 3: Clicking SIGN IN...');
-    await clickFirstVisible(
-      page,
-      [
-        'input[type="submit"]',
-        'button:has-text("SIGN IN")',
-        'button:has-text("Sign In")',
-        'button:has-text("Login")',
-        'input[type="submit"][value*="SIGN IN" i]',
-        'input[type="submit"][value*="Login" i]',
-        'text=SIGN IN',
-        'text=Sign In'
-      ],
-      'click sign in'
-    );
+    
+
+    await page.waitForSelector('#sbtbtn', {
+      state: 'visible',
+      timeout: 10000
+    });
+    await screenshot(page, '03-before-signin.png');
+    await page.locator('#sbtbtn').click();
+    await page.waitForLoadState('networkidle');
+    await page.waitForTimeout(5000);
+    await screenshot(page, '04-after-login.png');
+
+
+
+    
 
     await page.waitForLoadState('domcontentloaded').catch(() => {});
     await page.waitForTimeout(3000);
