@@ -494,14 +494,6 @@ if (!mainFrame) {
 
 }
 
-    if (!mainFrame) {
-
-        throw new Error(
-            'Main upload frame not found.'
-        );
-
-    }
-
     await mainFrame.locator(
         '#uploadedFile'
     ).setInputFiles(
@@ -1059,16 +1051,19 @@ async function main() {
 const mainFrame =
     page.frames().find(
         frame =>
-            frame.url().includes('/config/internal/')
-    );
-
-const mainFrame =
-    page.frames().find(
-        frame =>
             frame.url().includes(
                 'zipUploadInput'
             )
     );
+
+if (!mainFrame) {
+
+    throw new Error(
+        'zipUploadInput frame not found.'
+    );
+
+}
+
 
 await mainFrame.locator(
     'input[type="submit"][value="Upload"]'
