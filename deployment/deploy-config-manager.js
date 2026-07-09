@@ -4,7 +4,7 @@ const path = require('path');
 
 const CONFIG_MANAGER_URL = process.env.CONFIG_MANAGER_URL;
 const CONFIG_MANAGER_USERNAME = process.env.CONFIG_MANAGER_USERNAME;
-const CONFIG_MANAGER_PASS = process.env.CONFIG_MANAGER_PASS;
+const CONFIG_MANAGER_PASS = process.env.CONFIG_MANAGER_PASSWORD;
 const CONFIG_ZIP_PATH = process.env.CONFIG_ZIP_PATH || '../partial-config.zip';
 const DEPLOY_MODE = (process.env.DEPLOY_MODE || 'merge').toLowerCase();
 const DEPLOY_DESCRIPTION =
