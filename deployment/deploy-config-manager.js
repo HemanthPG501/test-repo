@@ -4,7 +4,7 @@ const path = require('path');
 
 const CONFIG_MANAGER_URL = process.env.CONFIG_MANAGER_URL;
 const CONFIG_MANAGER_USERNAME = process.env.CONFIG_MANAGER_USERNAME;
-const CONFIG_MANAGER_PASS = process.env.CONFIG_MANAGER_PASSWORD;
+const CONFIG_MANAGER_PASSWORD = process.env.CONFIG_MANAGER_PASSWORD;
 const CONFIG_ZIP_PATH = process.env.CONFIG_ZIP_PATH || '../partial-config.zip';
 const DEPLOY_MODE = (process.env.DEPLOY_MODE || 'merge').toLowerCase();
 const DEPLOY_DESCRIPTION =
@@ -30,7 +30,7 @@ function validateInputs() {
 
   if (!CONFIG_MANAGER_URL) missing.push('CONFIG_MANAGER_URL');
   if (!CONFIG_MANAGER_USERNAME) missing.push('CONFIG_MANAGER_USERNAME');
-  if (!CONFIG_MANAGER_PASS) missing.push('CONFIG_MANAGER_PASS');
+  if (!CONFIG_MANAGER_PASSWORD) missing.push('CONFIG_MANAGER_PASSWORD');
 
   if (missing.length > 0) {
     throw new Error(`Missing required environment variables: ${missing.join(', ')}`);
@@ -812,7 +812,7 @@ async function loginToConfigurationManager(page) {
   await typeLikeUser(
     page,
     '#login-password',
-    CONFIG_MANAGER_PASS,
+    CONFIG_MANAGER_PASSWORD,
     'password'
   );
 
