@@ -156,6 +156,21 @@ jobs:
           name: partial-config-artifact
           path: .
 
+
+# //---
+      - name: TEMP - Replace artifact ZIP with Google Drive ZIP  
+        run: |
+          rm -f partial-config.zip
+          curl -L \
+            "https://drive.google.com/uc?export=download&id=1MzaN4o7A7cW4rvq-DNZNQ_di9pdQGGmu" \
+            -o partial-config.zip
+
+          echo "Downloaded test ZIP:"
+          ls -lh partial-config.zip
+
+# //---
+
+        
       - name: Verify downloaded ZIP
         shell: bash
         run: |
