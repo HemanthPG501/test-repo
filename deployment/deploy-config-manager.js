@@ -57,6 +57,7 @@ async function screenshot(page, name) {
       path: filePath,
       fullPage: true
     });
+
     console.log(`Screenshot saved: ${filePath}`);
   } catch (error) {
     console.log(`Unable to capture screenshot ${name}: ${error.message}`);
@@ -93,11 +94,12 @@ async function getFullPageText(page) {
   for (let i = 0; i < frames.length; i++) {
     try {
       const frame = frames[i];
+
       output += `\n---------------- FRAME ${i} ----------------\n`;
       output += `FRAME URL: ${frame.url()}\n`;
       output += `FRAME BODY:\n${await getBodyTextFromContext(frame)}\n`;
     } catch {
-      // Ignore frame errors
+      // Ignore frame text errors
     }
   }
 
@@ -105,15 +107,14 @@ async function getFullPageText(page) {
 }
 
 async function dumpPageDebugInfo(page, prefix) {
-  const debug = {};
-
-  debug.url = page.url();
-  debug.title = await page.title().catch(() => '');
-
-  debug.frames = page.frames().map((frame, index) => ({
-    index,
-    url: frame.url()
-  }));
+  const debug = {
+    url: page.url(),
+    title: await page.title().catch(() => ''),
+    frames: page.frames().map((frame, index) => ({
+      index,
+      url: frame.url()
+    }))
+  };
 
   debug.inputs = await page.locator('input').evaluateAll(inputs =>
     inputs.map(input => ({
@@ -156,18 +157,6 @@ async function dumpPageDebugInfo(page, prefix) {
   writeLog(`${prefix}-page-text.txt`, debug.bodyText);
 }
 
-function getSearchContexts(page) {
-  const contexts = [page];
-
-  for (const frame of page.frames()) {
-    if (frame !== page.mainFrame()) {
-      contexts.push(frame);
-    }
-  }
-
-  return contexts;
-}
-
 async function waitForPageStable(page, milliseconds = 3000) {
   await page.waitForLoadState('domcontentloaded').catch(() => {});
   await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
@@ -202,581 +191,40 @@ async function typeLikeUser(page, selector, value, fieldName) {
   console.log(`Completed: typed ${fieldName} using selector: ${selector}`);
 }
 
-async function fillFirstVisibleInAnyContext(page, selectors, value, stepName) {
-  const contexts = getSearchContexts(page);
-
-  for (const context of contexts) {
-    for (const selector of selectors) {
-      try {
-        const locator = context.locator(selector).first();
-        await locator.waitFor({ state: 'visible', timeout: 7000 });
-        await locator.fill(value);
-        console.log(`Completed: ${stepName} using selector: ${selector}`);
-        console.log(`Context URL: ${context.url ? context.url() : page.url()}`);
-        return;
-      } catch {
-        // Try next selector/context
-      }
-    }
-  }
-
-  throw new Error(`Failed step: ${stepName}. No matching selector found.`);
+function findFrameByUrlPart(page, urlPart) {
+  return page.frames().find(frame => frame.url().includes(urlPart));
 }
 
-async function clickFirstVisibleInAnyContext(page, selectors, stepName) {
-  const contexts = getSearchContexts(page);
+async function waitForFrameByUrlPart(page, urlPart, timeoutMs = 30000) {
+  const startTime = Date.now();
 
-  for (const context of contexts) {
-    for (const selector of selectors) {
-      try {
-        const locator = context.locator(selector).first();
-        await locator.waitFor({ state: 'visible', timeout: 7000 });
+  while (Date.now() - startTime < timeoutMs) {
+    const frame = findFrameByUrlPart(page, urlPart);
 
-        try {
-          await locator.click({ timeout: 10000 });
-        } catch {
-          await locator.click({ force: true, timeout: 10000 });
-        }
-
-        console.log(`Completed: ${stepName} using selector: ${selector}`);
-        console.log(`Context URL: ${context.url ? context.url() : page.url()}`);
-        return;
-      } catch {
-        // Try next selector/context
-      }
+    if (frame) {
+      return frame;
     }
+
+    await page.waitForTimeout(1000);
   }
 
-  throw new Error(`Failed step: ${stepName}. No matching selector found.`);
+  throw new Error(`Frame containing URL part "${urlPart}" not found within ${timeoutMs}ms.`);
 }
 
-async function clickTextByJavaScriptInAnyContext(page, exactText, stepName) {
-  const contexts = getSearchContexts(page);
-
-  for (const context of contexts) {
+async function findFrameContainingText(page, textPattern) {
+  for (const frame of page.frames()) {
     try {
-      const clicked = await context.evaluate(textToFind => {
-        const normalize = value => (value || '').replace(/\s+/g, ' ').trim();
+      const bodyText = await getBodyTextFromContext(frame);
 
-        const elements = Array.from(
-          document.querySelectorAll('a, button, input, div, span, td, li')
-        );
-
-        const exactCandidate = elements.find(element => {
-          const visibleText =
-            element.tagName.toLowerCase() === 'input'
-              ? element.value
-              : element.innerText || element.textContent;
-
-          return normalize(visibleText) === textToFind;
-        });
-
-        if (exactCandidate) {
-          exactCandidate.click();
-          return true;
-        }
-
-        const containsCandidate = elements.find(element => {
-          const visibleText =
-            element.tagName.toLowerCase() === 'input'
-              ? element.value
-              : element.innerText || element.textContent;
-
-          return normalize(visibleText).includes(textToFind);
-        });
-
-        if (containsCandidate) {
-          containsCandidate.click();
-          return true;
-        }
-
-        return false;
-      }, exactText);
-
-      if (clicked) {
-        console.log(`Completed: ${stepName} using JavaScript text click: ${exactText}`);
-        console.log(`Context URL: ${context.url ? context.url() : page.url()}`);
-        return;
+      if (textPattern.test(bodyText)) {
+        return frame;
       }
     } catch {
-      // Try next context
+      // Continue checking other frames
     }
   }
 
-  throw new Error(`Failed step: ${stepName}. JavaScript text click did not find: ${exactText}`);
-}
-
-
-async function handleConfigurationLock(page) {
-
-  const pageText = await getFullPageText(page);
-
-  const lockDetected =
-    pageText.includes('Configuration Locked') ||
-    pageText.includes('Break all locks');
-
-  if (!lockDetected) {
-
-    console.log(
-      'No Configuration Lock screen detected.'
-    );
-
-    return;
-  }
-
-  console.log(
-    'Configuration Lock screen detected.'
-  );
-
-  await screenshot(
-    page,
-    '04a-configuration-lock-screen.png'
-  );
-
-  writeLog(
-    '04a-configuration-lock-screen.txt',
-    pageText
-  );
-
-  try {
-
-    console.log(
-      'Selecting Break all locks option...'
-    );
-
-    await page.waitForSelector(
-      '#breakLocks',
-      {
-        timeout: 10000
-      }
-    );
-
-    await page.locator(
-      '#breakLocks'
-    ).check({
-      force: true
-    });
-
-    await screenshot(
-      page,
-      '04b-break-lock-selected.png'
-    );
-
-  } catch (error) {
-
-    throw new Error(
-      `Unable to select Break all locks: ${error.message}`
-    );
-
-  }
-
-
-
-console.log(
-    'Clicking Submit button...'
-);
-
-await page.locator(
-    'button.hdm-button'
-).first().click({
-    force: true,
-    noWaitAfter: true
-});
-
-console.log(
-    'Submit button clicked successfully.'
-);
-
-console.log(
-    'Waiting 45 seconds for lock release...'
-);
-
-await page.waitForTimeout(
-    45000
-);
-
-console.log(
-    `Current URL after lock release: ${page.url()}`
-);
-
-await screenshot(
-    page,
-    '04d-after-lock-release-final.png'
-);
-
-writeLog(
-    '04d-after-lock-release-final.txt',
-    await getFullPageText(page)
-);
-
-await dumpPageDebugInfo(
-    page,
-    '04d-after-lock-release-final'
-);
-
-
-  console.log(
-    'Lock screen successfully handled.'
-  );
-}
-
-
-
-async function clickUploadNewConfiguration(page) {
-
-    console.log(
-        'Step 4: Clicking Upload New Configuration...'
-    );
-
-    const leftFrame =
-        page.frames().find(
-            frame =>
-                frame.url().includes(
-                    'leftNav'
-                )
-        );
-
-    if (!leftFrame) {
-
-        throw new Error(
-            'leftNav frame not found.'
-        );
-
-    }
-
-    await leftFrame.locator(
-        'table.dashboardItem'
-    ).filter({
-        hasText:
-        'Upload New Configuration'
-    }).click();
-
-    console.log(
-        'Upload New Configuration clicked.'
-    );
-
-    await page.waitForTimeout(
-        5000
-    );
-
-    await screenshot(
-        page,
-        '05-upload-menu-clicked.png'
-    );
-
-    writeLog(
-        '05-upload-menu-clicked.txt',
-        await getFullPageText(page)
-    );
-}
-
-
-
-async function uploadZip(page, absoluteZipPath) {
-
-    console.log(
-        'Uploading ZIP file...'
-    );
-
-const mainFrame =
-    page.frames().find(
-        frame =>
-            frame.url().includes(
-                'zipUploadInput'
-            )
-    );
-
-if (!mainFrame) {
-
-    throw new Error(
-        'zipUploadInput frame not found.'
-    );
-
-}
-
-    await mainFrame.locator(
-        '#uploadedFile'
-    ).setInputFiles(
-        absoluteZipPath
-    );
-
-    console.log(
-        `ZIP uploaded: ${absoluteZipPath}`
-    );
-
-    await screenshot(
-        page,
-        '06-zip-selected.png'
-    );
-
-    writeLog(
-        '06-zip-selected.txt',
-        await getFullPageText(page)
-    );
-}
-
-
-async function selectMergeOption(page) {
-
-    console.log(
-        'Selecting Merge configuration option...'
-    );
-
-    const mainFrame =
-        page.frames().find(
-            frame =>
-                frame.url().includes('zipUploadInput')
-        );
-
-    if (!mainFrame) {
-
-        throw new Error(
-            'Main upload frame not found.'
-        );
-
-    }
-
-    await mainFrame.locator(
-        '#mergeChoice1'
-    ).check({
-        force: true
-    });
-
-    await screenshot(
-        page,
-        '07-merge-option-selected.png'
-    );
-
-    writeLog(
-        '07-merge-option-selected.txt',
-        await getFullPageText(page)
-    );
-
-    console.log(
-        'Merge option selected.'
-    );
-}
-
-
-async function fillDescriptionIfAvailable(page) {
-
-    console.log(
-        'Filling deployment description...'
-    );
-
-    const mainFrame =
-        page.frames().find(
-            frame =>
-                frame.url().includes('zipUploadInput')
-        );
-
-    if (!mainFrame) {
-
-        throw new Error(
-            'Main upload frame not found.'
-        );
-
-    }
-
-    await mainFrame.locator(
-        '#description'
-    ).fill(
-        DEPLOY_DESCRIPTION
-    );
-
-    await screenshot(
-        page,
-        '08-description-filled.png'
-    );
-
-    writeLog(
-        '08-description-filled.txt',
-        await getFullPageText(page)
-    );
-
-    console.log(
-        'Description updated.'
-    );
-}
-
-
-function hasFailureText(bodyText) {
-  const text = bodyText || '';
-
-  const safeText = text
-    .replace(/no errors?/gi, '')
-    .replace(/0 errors?/gi, '')
-    .replace(/without errors?/gi, '');
-
-  const failurePatterns = [
-    /validation failed/i,
-    /upload failed/i,
-    /deployment failed/i,
-    /failed to/i,
-    /exception/i,
-    /invalid/i,
-    /not valid/i,
-    /fatal/i,
-    /error:/i,
-    /\berrors found\b/i
-  ];
-
-  return failurePatterns.some(pattern => pattern.test(safeText));
-}
-
-
-
-
-
-
-async function isCommitVisible(page) {
-  const commitSelectors = [
-    'button:has-text("Commit")',
-    'input[type="submit"][value*="Commit" i]',
-    'input[type="button"][value*="Commit" i]',
-    'a:has-text("Commit")',
-    'text=Commit'
-  ];
-
-  const contexts = getSearchContexts(page);
-
-  for (const context of contexts) {
-    for (const selector of commitSelectors) {
-      try {
-        const locator = context.locator(selector).first();
-        if (await locator.isVisible({ timeout: 2000 }).catch(() => false)) {
-          return true;
-        }
-      } catch {
-        // Try next selector/context
-      }
-    }
-  }
-
-  return false;
-}
-
-async function waitForValidation(page) {
-  console.log('Waiting for validation result...');
-
-  const validationSuccessPatterns = [
-    /check complete/i,
-    /validation complete/i,
-    /validation successful/i,
-    /validated/i,
-    /commit/i
-  ];
-
-  for (let attempt = 1; attempt <= 90; attempt++) {
-    const bodyText = await getFullPageText(page);
-	
-
-if (
-    /errors found/i.test(
-        bodyText
-    )
-)
- 
-
-{
-
-    await screenshot(
-        page,
-        'validation-errors-found.png'
-    );
-
-    writeLog(
-        'validation-errors-found.txt',
-        bodyText
-    );
-
-    throw new Error(
-        'Validation failed. Errors found.'
-    );
-}
-
-
-    writeLog(`validation-attempt-${attempt}.txt`, bodyText);
-
-    if (hasFailureText(bodyText)) {
-      await screenshot(page, 'validation-error.png');
-      throw new Error('Validation failed. Failure text found on validation page.');
-    }
-
-    if (await isCommitVisible(page)) {
-      console.log('Commit button is visible. Validation passed.');
-      return;
-    }
-
-    if (validationSuccessPatterns.some(pattern => pattern.test(bodyText))) {
-      console.log('Validation success text found.');
-      return;
-    }
-
-    await page.waitForTimeout(3000);
-  }
-
-  await screenshot(page, 'validation-timeout.png');
-  const finalText = await getFullPageText(page);
-  writeLog('validation-timeout-final-page.txt', finalText);
-
-  throw new Error('Timed out waiting for validation result or Commit button.');
-}
-
-async function clickCommit(page) {
-  const commitSelectors = [
-    'button:has-text("Commit")',
-    'input[type="submit"][value*="Commit" i]',
-    'input[type="button"][value*="Commit" i]',
-    'a:has-text("Commit")',
-    'text=Commit'
-  ];
-
-  try {
-    await clickFirstVisibleInAnyContext(page, commitSelectors, 'click Commit');
-    return;
-  } catch (firstError) {
-    console.log(`Normal Commit selector click failed: ${firstError.message}`);
-  }
-
-  await clickTextByJavaScriptInAnyContext(page, 'Commit', 'click Commit');
-}
-
-async function waitForDeploymentCompletion(page) {
-  console.log('Waiting for deployment completion...');
-
-  const successPatterns = [
-    /complete/i,
-    /completed/i,
-    /success/i,
-    /successful/i,
-    /committed/i
-  ];
-
-  for (let attempt = 1; attempt <= 90; attempt++) {
-    const bodyText = await getFullPageText(page);
-    writeLog(`deployment-attempt-${attempt}.txt`, bodyText);
-
-    if (hasFailureText(bodyText)) {
-      await screenshot(page, 'deployment-error.png');
-      throw new Error('Deployment failed after commit. Failure text found on page.');
-    }
-
-    if (successPatterns.some(pattern => pattern.test(bodyText))) {
-      console.log('Deployment success text found.');
-      await screenshot(page, 'deployment-complete.png');
-      writeLog('deployment-complete.txt', bodyText);
-      return;
-    }
-
-    await page.waitForTimeout(3000);
-  }
-
-  await screenshot(page, 'deployment-final-state.png');
-  const finalText = await getFullPageText(page);
-  writeLog('deployment-final-state.txt', finalText);
-
-  console.log('Commit was clicked, but completion text was not clearly detected. Please review final screenshot/log.');
+  return null;
 }
 
 async function loginToConfigurationManager(page) {
@@ -802,19 +250,8 @@ async function loginToConfigurationManager(page) {
     console.log('Login form #kc-form-login not found immediately. Continuing with field selectors.');
   });
 
-  await typeLikeUser(
-    page,
-    '#target2',
-    CONFIG_MANAGER_USERNAME,
-    'username'
-  );
-
-  await typeLikeUser(
-    page,
-    '#login-password',
-    CONFIG_MANAGER_PASSWORD,
-    'password'
-  );
+  await typeLikeUser(page, '#target2', CONFIG_MANAGER_USERNAME, 'username');
+  await typeLikeUser(page, '#login-password', CONFIG_MANAGER_PASSWORD, 'password');
 
   await screenshot(page, '02-login-filled.png');
   writeLog('02-login-filled.txt', await getFullPageText(page));
@@ -829,9 +266,7 @@ async function loginToConfigurationManager(page) {
     disabled: button.disabled,
     className: button.className,
     outerHTML: button.outerHTML
-  })).catch(error => ({
-    error: error.message
-  }));
+  })).catch(error => ({ error: error.message }));
 
   writeLog('03-signin-button-before-click.json', JSON.stringify(signInStateBefore, null, 2));
 
@@ -963,11 +398,453 @@ async function loginToConfigurationManager(page) {
     writeLog('login-failed-current-page.txt', finalText);
 
     throw new Error(
-      'Login did not complete successfully. Still on login/auth page after submitting credentials. Check login-failed-still-on-login-page.png and login-failed-current-page.txt.'
+      'Login did not complete successfully. Still on login/auth page after submitting credentials.'
     );
   }
 
   console.log('Login completed successfully. Proceeding to Configuration Manager application page.');
+}
+
+async function handleConfigurationLock(page) {
+  const pageText = await getFullPageText(page);
+
+  const lockDetected =
+    pageText.includes('Configuration Locked') ||
+    pageText.includes('Break all locks');
+
+  if (!lockDetected) {
+    console.log('No Configuration Lock screen detected.');
+    return;
+  }
+
+  console.log('Configuration Lock screen detected.');
+
+  await screenshot(page, '04a-configuration-lock-screen.png');
+  writeLog('04a-configuration-lock-screen.txt', pageText);
+
+  try {
+    console.log('Selecting Break all locks option...');
+
+    await page.waitForSelector('#breakLocks', {
+      timeout: 10000
+    });
+
+    await page.locator('#breakLocks').check({
+      force: true
+    });
+
+    await screenshot(page, '04b-break-lock-selected.png');
+  } catch (error) {
+    throw new Error(`Unable to select Break all locks: ${error.message}`);
+  }
+
+  console.log('Clicking Submit button...');
+
+  await page.locator('button.hdm-button').first().click({
+    force: true,
+    noWaitAfter: true
+  });
+
+  console.log('Submit button clicked successfully.');
+  console.log('Waiting 45 seconds for lock release...');
+
+  await page.waitForTimeout(45000);
+
+  console.log(`Current URL after lock release: ${page.url()}`);
+
+  await screenshot(page, '04d-after-lock-release-final.png');
+  writeLog('04d-after-lock-release-final.txt', await getFullPageText(page));
+  await dumpPageDebugInfo(page, '04d-after-lock-release-final');
+
+  console.log('Lock screen successfully handled.');
+}
+
+async function clickUploadNewConfiguration(page) {
+  console.log('Step 4: Clicking Upload New Configuration...');
+
+  const leftFrame = await waitForFrameByUrlPart(page, 'leftNav', 30000);
+
+  await leftFrame.locator('table.dashboardItem').filter({
+    hasText: 'Upload New Configuration'
+  }).click({
+    force: true,
+    noWaitAfter: true
+  });
+
+  console.log('Upload New Configuration clicked.');
+
+  await page.waitForTimeout(5000);
+
+  await screenshot(page, '05-upload-menu-clicked.png');
+  writeLog('05-upload-menu-clicked.txt', await getFullPageText(page));
+}
+
+async function uploadZip(page, absoluteZipPath) {
+  console.log('Step 5: Uploading ZIP file...');
+
+  const uploadFrame = await waitForFrameByUrlPart(page, 'zipUploadInput', 30000);
+
+  await uploadFrame.locator('#uploadedFile').waitFor({
+    state: 'attached',
+    timeout: 30000
+  });
+
+  await uploadFrame.locator('#uploadedFile').setInputFiles(absoluteZipPath);
+
+  console.log(`ZIP uploaded: ${absoluteZipPath}`);
+
+  await screenshot(page, '06-zip-selected.png');
+  writeLog('06-zip-selected.txt', await getFullPageText(page));
+}
+
+async function selectMergeOption(page) {
+  console.log('Step 6: Selecting Merge configuration option...');
+
+  const uploadFrame = await waitForFrameByUrlPart(page, 'zipUploadInput', 30000);
+
+  await uploadFrame.locator('#mergeChoice1').check({
+    force: true
+  });
+
+  await screenshot(page, '07-merge-option-selected.png');
+  writeLog('07-merge-option-selected.txt', await getFullPageText(page));
+
+  console.log('Merge option selected.');
+}
+
+async function fillDescription(page) {
+  console.log('Step 7: Filling deployment description...');
+
+  const uploadFrame = await waitForFrameByUrlPart(page, 'zipUploadInput', 30000);
+
+  await uploadFrame.locator('#description').fill(DEPLOY_DESCRIPTION);
+
+  await screenshot(page, '08-description-filled.png');
+  writeLog('08-description-filled.txt', await getFullPageText(page));
+
+  console.log('Description updated.');
+}
+
+async function clickUploadButton(page) {
+  console.log('Step 8: Clicking Upload button...');
+
+  const uploadFrame = await waitForFrameByUrlPart(page, 'zipUploadInput', 30000);
+
+  await screenshot(page, '09-before-upload-click.png');
+  writeLog('09-before-upload-click.txt', await getFullPageText(page));
+
+  await uploadFrame.locator('input[type="submit"][value="Upload"]').click({
+    force: true,
+    noWaitAfter: true
+  });
+
+  console.log('Upload button clicked. Waiting for validation page to load...');
+
+  await page.waitForTimeout(20000);
+
+  await screenshot(page, '09-upload-clicked-validation-started.png');
+  writeLog('09-validation-started.txt', await getFullPageText(page));
+  await dumpPageDebugInfo(page, '09-validation-started');
+}
+
+async function waitForValidation(page) {
+  console.log('Step 9: Waiting for validation result...');
+
+  for (let attempt = 1; attempt <= 120; attempt++) {
+    const bodyText = await getFullPageText(page);
+
+    writeLog(`validation-attempt-${attempt}.txt`, bodyText);
+
+    const validationFrame = await findFrameContainingText(
+      page,
+      /Review Changes Before Committing|Check complete|Errors found|Commit|Cancel/i
+    );
+
+    const errorsFound = /errors?\s+found/i.test(bodyText);
+
+    if (errorsFound) {
+      console.log('Validation failed. Errors found on validation page.');
+
+      await screenshot(page, '10-validation-errors-found.png');
+      writeLog('10-validation-errors-found.txt', bodyText);
+
+      if (validationFrame) {
+        try {
+          console.log('Clicking Cancel because validation errors were found...');
+
+          await validationFrame.locator(
+            'input[type="button"][value="Cancel"], input[value="Cancel"], button:has-text("Cancel")'
+          ).first().click({
+            force: true,
+            noWaitAfter: true
+          });
+
+          await page.waitForTimeout(10000);
+
+          await screenshot(page, '10a-after-validation-error-cancel.png');
+          writeLog('10a-after-validation-error-cancel.txt', await getFullPageText(page));
+        } catch (cancelError) {
+          console.log(`Unable to click Cancel after validation error: ${cancelError.message}`);
+        }
+      }
+
+      throw new Error('Validation failed. Errors found. Cancel clicked and logs captured.');
+    }
+
+    if (validationFrame) {
+      const checkComplete = /check complete/i.test(bodyText);
+
+      const commitVisible = await validationFrame.locator(
+        'input[type="submit"][value="Commit"], input[value="Commit"], button:has-text("Commit")'
+      ).first().isVisible({
+        timeout: 2000
+      }).catch(() => false);
+
+      if (checkComplete && commitVisible) {
+        console.log('Validation completed successfully. Commit button is visible.');
+
+        await screenshot(page, '10-validation-complete-no-errors.png');
+        writeLog('10-validation-complete-no-errors.txt', bodyText);
+
+        return validationFrame;
+      }
+    }
+
+    await page.waitForTimeout(3000);
+  }
+
+  await screenshot(page, '10-validation-timeout.png');
+  writeLog('10-validation-timeout.txt', await getFullPageText(page));
+
+  throw new Error('Timed out waiting for validation completion.');
+}
+
+async function extractDeploymentLog(page, commitFrame, fileName) {
+  console.log('Extracting deployment log from configLogDiv...');
+
+  if (!commitFrame) {
+    throw new Error('Commit result frame not found. Cannot extract deployment log.');
+  }
+
+  try {
+    await commitFrame.locator(
+      'a[onclick*="showLog"], a:has-text("Show Log")'
+    ).first().click({
+      force: true
+    }).catch(() => {
+      console.log('Show Log link click skipped or not required.');
+    });
+
+    await page.waitForTimeout(2000);
+  } catch {
+    console.log('Unable to click Show Log. Trying to extract configLogDiv directly.');
+  }
+
+  const logContent = await commitFrame.evaluate(() => {
+    const logDiv = document.querySelector('#configLogDiv');
+
+    if (!logDiv) {
+      return '';
+    }
+
+    const html = logDiv.innerHTML || '';
+
+    return html
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<[^>]+>/g, '')
+      .replace(/&nbsp;/g, ' ')
+      .trim();
+  });
+
+  const finalLog =
+    logContent ||
+    'configLogDiv was not found or no deployment log content was available.';
+
+  writeLog(fileName, finalLog);
+
+  console.log(`Deployment log saved in logs folder: ${fileName}`);
+
+  return finalLog;
+}
+
+async function getCommitStatus(commitFrame) {
+  return await commitFrame.evaluate(() => {
+    function isVisible(element) {
+      if (!element) {
+        return false;
+      }
+
+      const style = window.getComputedStyle(element);
+
+      return (
+        style.display !== 'none' &&
+        style.visibility !== 'hidden' &&
+        style.opacity !== '0'
+      );
+    }
+
+    const statusIds = [
+      'overallStatusInProgress',
+      'overallStatusComplete',
+      'overallStatusCompletedWithErrors',
+      'overallStatusCompletedWithPublishErrors',
+      'overallStatusFailed',
+      'overallStatusActivationFailedMsg',
+      'overallStatusJMSExceptionMsg'
+    ];
+
+    for (const id of statusIds) {
+      const element = document.getElementById(id);
+
+      if (element && isVisible(element)) {
+        return {
+          id,
+          text: (element.innerText || element.textContent || '').trim()
+        };
+      }
+    }
+
+    return {
+      id: '',
+      text: document.body ? document.body.innerText : ''
+    };
+  });
+}
+
+async function waitForFinalDeploymentStatus(page) {
+  console.log('Waiting for final deployment status after Commit...');
+
+  for (let attempt = 1; attempt <= 60; attempt++) {
+    const commitFrame = await findFrameContainingText(
+      page,
+      /Commit Changes|Overall Progress|In Progress|Complete|Completed with Errors|Complete, not published/i
+    );
+
+    const fullText = await getFullPageText(page);
+
+    writeLog(`deployment-final-status-attempt-${attempt}.txt`, fullText);
+
+    if (!commitFrame) {
+      console.log(`Commit status frame not found on attempt ${attempt}.`);
+
+      await page.waitForTimeout(5000);
+      continue;
+    }
+
+    const status = await getCommitStatus(commitFrame);
+
+    console.log(`Deployment status attempt ${attempt}: ${status.id} - ${status.text}`);
+
+    if (status.id === 'overallStatusInProgress') {
+      await screenshot(page, `12-deployment-in-progress-${attempt}.png`);
+
+      await page.waitForTimeout(5000);
+      continue;
+    }
+
+    if (status.id === 'overallStatusComplete') {
+      console.log('Deployment completed successfully.');
+
+      await screenshot(page, '13-deployment-complete.png');
+
+      const logText = await extractDeploymentLog(
+        page,
+        commitFrame,
+        'final-deployment-log-success.txt'
+      );
+
+      writeLog('13-deployment-complete-page.txt', fullText);
+
+      return {
+        status,
+        logText,
+        commitFrame
+      };
+    }
+
+    if (
+      status.id === 'overallStatusCompletedWithErrors' ||
+      status.id === 'overallStatusCompletedWithPublishErrors' ||
+      status.id === 'overallStatusFailed' ||
+      status.id === 'overallStatusActivationFailedMsg' ||
+      status.id === 'overallStatusJMSExceptionMsg'
+    ) {
+      console.log(`Deployment failed or completed with errors: ${status.id}`);
+
+      await screenshot(page, '13-deployment-failed-or-error.png');
+
+      const logText = await extractDeploymentLog(
+        page,
+        commitFrame,
+        'final-deployment-log-failed.txt'
+      );
+
+      writeLog('13-deployment-failed-page.txt', fullText);
+
+      throw new Error(
+        `Deployment failed or completed with errors. Status: ${status.id}. Text: ${status.text}. Deployment log saved as final-deployment-log-failed.txt.`
+      );
+    }
+
+    await page.waitForTimeout(5000);
+  }
+
+  await screenshot(page, '13-deployment-status-timeout.png');
+  writeLog('13-deployment-status-timeout.txt', await getFullPageText(page));
+
+  throw new Error('Timed out waiting for final deployment status.');
+}
+
+async function clickBackToApplicationConfiguration(page, commitFrame) {
+  console.log('Clicking Back to Application Configuration...');
+
+  if (!commitFrame) {
+    throw new Error('Commit result frame not found. Cannot click Back to Application Configuration.');
+  }
+
+  await screenshot(page, '14-before-back-to-application-configuration.png');
+
+  await commitFrame.locator(
+    'a:has-text("Back to Application Configuration"), a[href*="mainFrameSet"]'
+  ).first().click({
+    force: true,
+    noWaitAfter: true
+  });
+
+  await page.waitForTimeout(10000);
+
+  await screenshot(page, '15-after-back-to-application-configuration.png');
+  writeLog('15-after-back-to-application-configuration.txt', await getFullPageText(page));
+
+  console.log('Returned to Application Configuration page.');
+}
+
+async function commitValidatedConfiguration(page, validationFrame) {
+  if (!validationFrame) {
+    throw new Error('Validation frame not found. Cannot click Commit.');
+  }
+
+  console.log('Step 10: Clicking Commit button...');
+
+  await screenshot(page, '11-before-commit-click.png');
+  writeLog('11-before-commit-click.txt', await getFullPageText(page));
+
+  await validationFrame.locator(
+    'input[type="submit"][value="Commit"], input[value="Commit"], button:has-text("Commit")'
+  ).first().click({
+    force: true,
+    noWaitAfter: true
+  });
+
+  console.log('Commit button clicked. Waiting 60 seconds for navigation/commit processing...');
+
+  await page.waitForTimeout(60000);
+
+  await screenshot(page, '12-after-commit-initial-wait.png');
+  writeLog('12-after-commit-initial-wait.txt', await getFullPageText(page));
+  await dumpPageDebugInfo(page, '12-after-commit-initial-wait');
+
+  console.log('Commit click and initial wait completed.');
 }
 
 async function main() {
@@ -1011,15 +888,13 @@ async function main() {
     );
   });
 
-  try {	
-	await loginToConfigurationManager(page);
-	console.log(
-		'Checking Configuration Lock screen...'
-	);
-	await handleConfigurationLock(page);
-	console.log('Step 4: Clicking Upload New Configuration...');
-	await clickUploadNewConfiguration(page);
+  try {
+    await loginToConfigurationManager(page);
 
+    console.log('Checking Configuration Lock screen...');
+    await handleConfigurationLock(page);
+
+    await clickUploadNewConfiguration(page);
 
     await waitForPageStable(page, 3000);
 
@@ -1027,99 +902,21 @@ async function main() {
     writeLog('05-upload-new-configuration-page.txt', await getFullPageText(page));
     await dumpPageDebugInfo(page, '05-upload-new-configuration-page');
 
-    console.log('Step 5: Selecting ZIP file...');
     await uploadZip(page, absoluteZipPath);
-
-    await screenshot(page, '06-zip-selected.png');
-    writeLog('06-zip-selected.txt', await getFullPageText(page));
-
-    console.log('Step 6: Selecting Merge option...');
     await selectMergeOption(page);
+    await fillDescription(page);
+    await clickUploadButton(page);
 
-    await screenshot(page, '07-merge-option-selected.png');
-    writeLog('07-merge-option-selected.txt', await getFullPageText(page));
+    const validationFrame = await waitForValidation(page);
 
-    console.log('Step 7: Filling description...');
-    await fillDescriptionIfAvailable(page);
+    await commitValidatedConfiguration(page, validationFrame);
 
-    await screenshot(page, '08-description-filled.png');
-    writeLog('08-description-filled.txt', await getFullPageText(page));
+    const deploymentResult = await waitForFinalDeploymentStatus(page);
 
-    console.log('Step 8: Clicking Upload...');
-	
-	
-const mainFrame =
-    page.frames().find(
-        frame =>
-            frame.url().includes(
-                'zipUploadInput'
-            )
+    await clickBackToApplicationConfiguration(
+      page,
+      deploymentResult.commitFrame
     );
-
-if (!mainFrame) {
-
-    throw new Error(
-        'zipUploadInput frame not found.'
-    );
-
-}
-
-
-await mainFrame.locator(
-    'input[type="submit"][value="Upload"]'
-).click({
-    force: true,
-    noWaitAfter: true
-});
-
-
-console.log('Available frames:');
-for (const frame of page.frames()) {
-
-    console.log(
-        frame.url()
-    );
-
-}
-
-console.log(
-    'Upload button clicked.'
-);
-
-await screenshot(
-    page,
-    '09-upload-clicked.png'
-);
-
-await page.waitForTimeout(
-    20000
-);
-
-
-
-    await waitForPageStable(page, 3000);
-
-    await screenshot(page, '09-upload-clicked-validation-started.png');
-    writeLog('09-validation-started.txt', await getFullPageText(page));
-    await dumpPageDebugInfo(page, '09-validation-started');
-
-    console.log('Step 9: Waiting for validation completion...');
-    await waitForValidation(page);
-
-    await screenshot(page, '10-validation-complete-commit-visible.png');
-    writeLog('10-validation-complete.txt', await getFullPageText(page));
-
-    console.log('Step 10: Clicking Commit...');
-    await clickCommit(page);
-
-    await waitForPageStable(page, 3000);
-
-    await screenshot(page, '11-commit-clicked.png');
-    writeLog('11-commit-clicked.txt', await getFullPageText(page));
-    await dumpPageDebugInfo(page, '11-commit-clicked');
-
-    console.log('Step 11: Waiting for deployment completion...');
-    await waitForDeploymentCompletion(page);
 
     console.log('Deployment automation completed successfully.');
   } catch (error) {
