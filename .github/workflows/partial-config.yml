@@ -34,75 +34,78 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          
+      - name: Determine target branch
+        shell: bash
+        run: |
+            if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+                TARGET_BRANCH="${GITHUB_REF_NAME}"
+            else
+                TARGET_BRANCH="${{ github.event.pull_request.base.ref }}"
+            fi
 
-      # ------------------------------------------------------------------
-      # KEEP YOUR EXISTING ZIP GENERATION LOGIC HERE
-      # ------------------------------------------------------------------
-      # Your current process already compares master/release branch,
-      # identifies changed files, creates the final folder structure,
-      # and generates partial-config.zip.
-      #
-      # Requirement:
-      # Final ZIP file must be available as:
-      # partial-config.zip
-      # ------------------------------------------------------------------
+            echo "TARGET_BRANCH=$TARGET_BRANCH" >> $GITHUB_ENV
+
+            echo "================================="
+            echo "Target Branch : $TARGET_BRANCH"
+            echo "================================="
 
 
       - name: Fetch master and target branch
         run: |
           git fetch origin master
-          git fetch origin ${{ github.event.pull_request.base.ref }}
-
+          git fetch origin "$TARGET_BRANCH"
+          
       - name: Get changed files (target vs master)
+        shell: bash
         run: |
-          TARGET_BRANCH=${{ github.event.pull_request.base.ref }}
-
-          echo "Using branch: $TARGET_BRANCH"
+            echo "================================="
+            echo "Generating Partial Configuration"
+            echo "Base Branch   : master"
+            echo "Target Branch : $TARGET_BRANCH"
+            echo "================================="          
 
           #  All changed files (unfiltered)
-          git diff --name-only --diff-filter=ACMRT origin/master...origin/$TARGET_BRANCH > all_changed_files.txt
-
-          #  Filter out .yml / .yaml files
-          grep -v -E '\.ya?ml$' all_changed_files.txt > changed_files.txt
+            git diff --name-only --diff-filter=ACMRT origin/master...origin/$TARGET_BRANCH > all_changed_files.txt
+            
+            echo ""
+            echo "All changed files:"
+            cat all_changed_files.txt
+            
+          # Exclude deployment framework files and workflow files
+            grep -v -E '(^deployment/deploy-config-manager\.js$|^deployment/package\.json$|\.ya?ml$)' all_changed_files.txt > changed_files.txt
+            
+            echo ""
+            echo "Filtered files for deployment ZIP:"
+            cat changed_files.txt
 
       - name: Verify changed files
+        shell: bash
         run: |
-          echo "Changed files:"
-          echo "Changed files:"
-
-          if [ ! -s changed_files.txt ]; then
-            echo "No files found for deployment."
-            exit 1
-          fi
+            if [ ! -s changed_files.txt ]; then
+                echo "ERROR: No deployable files found."
+                exit 1
+            fi
+            
+            echo "================================="
+            echo "Files selected for deployment"
+            echo "================================="
+            cat changed_files.txt
           
-#  Create partial-config.zip
       - name: Create partial-config.zip
+        shell: bash
         run: |
-          zip -@ partial-config.zip < changed_files.txt
-          
-#  Create final folder structure
-      - name: Prepare final artifact folder
-        run: |
-          mkdir generated-config
-          # mv partial-config.zip generated-config/
-          # mv changed_files.txt generated-config/
-          # mv all_changed_files.txt generated-config/
-          cp partial-config.zip generated-config/
-          cp changed_files.txt generated-config/
-          cp all_changed_files.txt generated-config/
+            echo "Creating partial-config.zip..."
+            zip -@ partial-config.zip < changed_files.txt
 
+            if [ ! -f partial-config.zip ]; then
+                echo "ERROR: ZIP creation failed."
+                exit 1
+            fi
 
-#  Upload single artifact (GitHub will zip this)
-      - name: Upload final artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: generated-config
-          path: generated-config
-          
-          
-          
-          
-          
+            echo "ZIP created successfully."
+            ls -lh partial-config.zip
+                    
         
       # Example safety check. Keep this even if your ZIP generation is above.
       - name: Verify partial config ZIP exists
@@ -128,25 +131,35 @@ jobs:
           name: partial-config-artifact
           path: partial-config.zip
           if-no-files-found: error
+          retention-days: 7
+          
 
   deploy-config:
     name: Deploy Partial Config to Configuration Manager
+
     needs: generate-config
+
     runs-on: ubuntu-latest
 
     env:
       CONFIG_MANAGER_URL: ${{ secrets.CONFIG_MANAGER_URL }}
       CONFIG_MANAGER_USERNAME: ${{ secrets.CONFIG_MANAGER_USERNAME }}
       CONFIG_MANAGER_PASSWORD: ${{ secrets.CONFIG_MANAGER_PASSWORD }}
+
+      ENABLE_CONFIG_DEPLOYMENT: ${{ secrets.ENABLE_CONFIG_DEPLOYMENT }}
+
       CONFIG_ZIP_PATH: ../partial-config.zip
+
       DEPLOY_MODE: merge
+
       DEPLOY_DESCRIPTION: >
-        ${{ github.event_name == 'workflow_dispatch' && inputs.deploy_description || 'Automated partial config deployment from GitHub Actions' }}
-        | Repo: ${{ github.repository }}
-        | Run: ${{ github.run_id }}
-        | Commit: ${{ github.sha }}
+        Repo:${{ github.repository }}
+        Branch:${{ github.ref_name }}
+        Run:${{ github.run_id }}
+        Commit:${{ github.sha }}
 
     steps:
+
       - name: Checkout repository
         uses: actions/checkout@v4
 
@@ -156,21 +169,6 @@ jobs:
           name: partial-config-artifact
           path: .
 
-
-# //---
-      - name: TEMP - Replace artifact ZIP with Google Drive ZIP  
-        run: |
-          rm -f partial-config.zip
-          curl -L \
-            "https://drive.google.com/uc?export=download&id=1MzaN4o7A7cW4rvq-DNZNQ_di9pdQGGmu" \
-            -o partial-config.zip
-
-          echo "Downloaded test ZIP:"
-          ls -lh partial-config.zip
-
-# //---
-
-        
       - name: Verify downloaded ZIP
         shell: bash
         run: |
@@ -181,30 +179,85 @@ jobs:
           ls -la
 
           if [ ! -f "partial-config.zip" ]; then
-            echo "ERROR: partial-config.zip artifact was not downloaded."
+            echo "ERROR: partial-config.zip was not downloaded."
             exit 1
           fi
 
           echo "Downloaded ZIP:"
           ls -lh partial-config.zip
 
-          echo "ZIP content:"
+          echo "ZIP Content:"
           unzip -l partial-config.zip
 
+      - name: Display deployment metadata
+        run: |
+            echo "=========================================="
+            echo "Repository : ${{ github.repository }}"
+            echo "Branch     : ${{ github.ref_name }}"
+            echo "Run ID     : ${{ github.run_id }}"
+            echo "Commit     : ${{ github.sha }}"
+            echo "=========================================="
+            
+        
+      - name: Normalize Deployment Switch
+        id: deployment_switch
+        shell: bash
+        run: |
+            DEPLOY_SWITCH=$(echo "${ENABLE_CONFIG_DEPLOYMENT}" | tr '[:upper:]' '[:lower:]')
+
+            echo "deploy_switch=$DEPLOY_SWITCH" >> "$GITHUB_OUTPUT"
+
+            echo ""
+            echo "=========================================="
+            echo "Deployment Switch"
+            echo "Raw Value        : ${ENABLE_CONFIG_DEPLOYMENT}"
+            echo "Normalized Value : ${DEPLOY_SWITCH}"
+            echo "=========================================="
+        env:
+            ENABLE_CONFIG_DEPLOYMENT: ${{ secrets.ENABLE_CONFIG_DEPLOYMENT }}
+
+      - name: Deployment Switch Status
+        shell: bash
+        run: |
+          echo ""
+          echo "=========================================="
+          echo "Deployment Switch Status"
+          echo "DEPLOY_SWITCH=${{ steps.deployment_switch.outputs.deploy_switch }}"
+          echo "=========================================="
+
+          if [ "${{ steps.deployment_switch.outputs.deploy_switch }}" = "true" ]; then
+            echo "Deployment ENABLED"
+          else
+            echo "Deployment DISABLED"
+            echo "Zip generation completed successfully."
+            echo "Deployment step will be skipped."
+          fi
+
+        env:
+          ENABLE_CONFIG_DEPLOYMENT: ${{ secrets.ENABLE_CONFIG_DEPLOYMENT }}
+          
+          
       - name: Setup Node.js
+        if: ${{ steps.deployment_switch.outputs.deploy_switch == 'true' }}
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+          cache: npm
+          cache-dependency-path: deployment/package-lock.json
 
-      - name: Install Playwright dependencies
+      - name: Install Node dependencies
+        if: ${{ steps.deployment_switch.outputs.deploy_switch == 'true' }}
         working-directory: deployment
-        run: npm install
+        run: npm ci
 
       - name: Install Chromium browser
+        if: ${{ steps.deployment_switch.outputs.deploy_switch == 'true' }}
         working-directory: deployment
         run: npx playwright install chromium --with-deps
 
+
       - name: Deploy config using Nokia Configuration Manager UI
+        if: ${{ steps.deployment_switch.outputs.deploy_switch == 'true' }}
         working-directory: deployment
         run: node deploy-config-manager.js
         env:
@@ -221,6 +274,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: deployment-evidence
+          retention-days: 7
           path: |
             deployment/screenshots/**
             deployment/logs/**
