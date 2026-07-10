@@ -162,42 +162,7 @@ jobs:
 
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      - name: Download partial config artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: partial-config-artifact
-          path: .
-
-      - name: Verify downloaded ZIP
-        shell: bash
-        run: |
-          echo "Current directory:"
-          pwd
-
-          echo "Files:"
-          ls -la
-
-          if [ ! -f "partial-config.zip" ]; then
-            echo "ERROR: partial-config.zip was not downloaded."
-            exit 1
-          fi
-
-          echo "Downloaded ZIP:"
-          ls -lh partial-config.zip
-
-          echo "ZIP Content:"
-          unzip -l partial-config.zip
-
-      - name: Display deployment metadata
-        run: |
-            echo "=========================================="
-            echo "Repository : ${{ github.repository }}"
-            echo "Branch     : ${{ github.ref_name }}"
-            echo "Run ID     : ${{ github.run_id }}"
-            echo "Commit     : ${{ github.sha }}"
-            echo "=========================================="
-            
+        
         
       - name: Normalize Deployment Switch
         id: deployment_switch
@@ -232,6 +197,45 @@ jobs:
             echo "Zip generation completed successfully."
             echo "Deployment step will be skipped."
           fi
+          
+
+      - name: Download partial config artifact
+        if: ${{ steps.deployment_switch.outputs.deploy_switch == 'true' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: partial-config-artifact
+          path: .
+
+      - name: Verify downloaded ZIP
+        if: ${{ steps.deployment_switch.outputs.deploy_switch == 'true' }}
+        shell: bash
+        run: |
+          echo "Current directory:"
+          pwd
+
+          echo "Files:"
+          ls -la
+
+          if [ ! -f "partial-config.zip" ]; then
+            echo "ERROR: partial-config.zip was not downloaded."
+            exit 1
+          fi
+
+          echo "Downloaded ZIP:"
+          ls -lh partial-config.zip
+
+          echo "ZIP Content:"
+          unzip -l partial-config.zip
+
+      - name: Display deployment metadata
+        if: ${{ steps.deployment_switch.outputs.deploy_switch == 'true' }}
+        run: |
+            echo "=========================================="
+            echo "Repository : ${{ github.repository }}"
+            echo "Branch     : ${{ github.ref_name }}"
+            echo "Run ID     : ${{ github.run_id }}"
+            echo "Commit     : ${{ github.sha }}"
+            echo "=========================================="
           
           
       - name: Setup Node.js
