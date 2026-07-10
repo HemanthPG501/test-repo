@@ -64,15 +64,15 @@ jobs:
             echo "Base Branch   : master"
             echo "Target Branch : $TARGET_BRANCH"
             echo "================================="          
-
-          #  All changed files (unfiltered)
+            
+            #  All changed files (unfiltered)
             git diff --name-only --diff-filter=ACMRT origin/master...origin/$TARGET_BRANCH > all_changed_files.txt
             
             echo ""
             echo "All changed files:"
             cat all_changed_files.txt
             
-          # Exclude deployment framework files and workflow files
+            # Exclude deployment framework files and workflow files
             grep -v -E '(^deployment/deploy-config-manager\.js$|^deployment/package\.json$|\.ya?ml$)' all_changed_files.txt > changed_files.txt
             
             echo ""
@@ -232,9 +232,6 @@ jobs:
             echo "Zip generation completed successfully."
             echo "Deployment step will be skipped."
           fi
-
-        env:
-          ENABLE_CONFIG_DEPLOYMENT: ${{ secrets.ENABLE_CONFIG_DEPLOYMENT }}
           
           
       - name: Setup Node.js
