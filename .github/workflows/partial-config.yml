@@ -137,7 +137,7 @@ jobs:
     env:
       CONFIG_MANAGER_URL: ${{ secrets.CONFIG_MANAGER_URL }}
       CONFIG_MANAGER_USERNAME: ${{ secrets.CONFIG_MANAGER_USERNAME }}
-      CONFIG_MANAGER_PASS: ${{ secrets.CONFIG_MANAGER_PASS }}
+      CONFIG_MANAGER_PASSWORD: ${{ secrets.CONFIG_MANAGER_PASSWORD }}
       CONFIG_ZIP_PATH: ../partial-config.zip
       DEPLOY_MODE: merge
       DEPLOY_DESCRIPTION: >
@@ -210,7 +210,7 @@ jobs:
         env:
           CONFIG_MANAGER_URL: ${{ env.CONFIG_MANAGER_URL }}
           CONFIG_MANAGER_USERNAME: ${{ env.CONFIG_MANAGER_USERNAME }}
-          CONFIG_MANAGER_PASS: ${{ env.CONFIG_MANAGER_PASS }}
+          CONFIG_MANAGER_PASSWORD: ${{ env.CONFIG_MANAGER_PASSWORD }}
           CONFIG_ZIP_PATH: ${{ env.CONFIG_ZIP_PATH }}
           DEPLOY_MODE: ${{ env.DEPLOY_MODE }}
           DEPLOY_DESCRIPTION: ${{ env.DEPLOY_DESCRIPTION }}
